@@ -21,7 +21,7 @@ Tapka — сенсорная панель для Windows 11: узкая капс
   <img src="assets/capsule-light.png" width="300" alt="Капсула, светлая тема и другой цвет акцента">
 </p>
 
-https://github.com/user-attachments/assets/e760fc27-4987-4b22-ab8c-c1023a3250f2
+https://github.com/user-attachments/assets/895c44cc-11f4-4ec9-96a5-64749f640b62
 
 ## Установка
 

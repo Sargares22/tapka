@@ -21,7 +21,7 @@ Tapka is a touch panel for Windows 11: a narrow capsule at the edge of the scree
   <img src="assets/capsule-light.png" width="300" alt="The capsule, light theme with another accent">
 </p>
 
-https://github.com/user-attachments/assets/e760fc27-4987-4b22-ab8c-c1023a3250f2
+https://github.com/user-attachments/assets/895c44cc-11f4-4ec9-96a5-64749f640b62
 
 ## Install
 
