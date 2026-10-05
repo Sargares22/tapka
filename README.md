@@ -25,49 +25,42 @@ https://github.com/user-attachments/assets/895c44cc-11f4-4ec9-96a5-64749f640b62
 
 ## Install
 
-1. Open [Releases](https://github.com/Sargares22/tapka/releases/latest) and download the installer for your processor: `Tapka_…_arm64-setup.exe` for ARM devices (Snapdragon), `Tapka_…_x64-setup.exe` for Intel and AMD.
+1. Download the installer from [Releases](https://github.com/Sargares22/tapka/releases/latest): `Tapka_…_arm64-setup.exe` for ARM (Snapdragon), `Tapka_…_x64-setup.exe` for Intel and AMD.
 2. Run it. The installer is not signed, so Windows shows "Windows protected your PC": press **More info**, then **Run anyway**.
-3. Tapka installs for the current user, without administrator rights, and starts.
+3. No administrator rights needed. Tapka appears at the right edge and opens its settings once.
 
-On the first start you get a capsule at the right edge with Windows actions that work at once, and the settings window opens one time. To remove Tapka, use "Installed apps" in Windows Settings.
-
-Some antivirus programs are wary of anything that sends key presses, and Tapka does exactly that when you tap a shortcut key. If yours raises an alarm, see [Privacy](#privacy) for what the panel does and does not do; the source is all here.
+To remove it: Windows Settings → Installed apps. Antivirus nervous because the panel sends key presses? See [Privacy](#privacy).
 
 ## What it does
 
-- **Never takes focus.** You tap a key, the shortcut goes to the window you were in, and that window stays active.
-- **Only when you need it.** Turn on *Only without a keyboard* (Settings → Look), and the capsule hides while a keyboard is attached and comes back when you detach or fold it. The tray icon shows or hides it at any moment.
-- **Snip without the capsule in the shot.** The Snip key hides the capsule while you select the area and brings it back when you are done.
-- **Four keys in sight, the rest a scroll away.** The list scrolls under your finger; a faded edge says there is more. A small **+** at the foot of the capsule opens the editor.
-- **Stays where you put it.** Drag the capsule by its handle to the left, right or top edge. After a screen rotation or a resolution change it is back at its edge.
-- **Wider apart without a keyboard.** When the keyboard is detached, the keys stand further apart for fingers.
-- **Behaves like the taskbar.** A key whose program is running carries a mark; tapping it again brings the window forward or minimizes it. Tapka never closes anything.
-- **Your look.** Dark, light or the same as Windows; any accent colour; three sizes.
-- **Russian and English.** Follows the language of Windows; can be switched in the settings.
-- **Quiet updates.** One check per start, a line in the settings and an Update button. No pop-ups. Can be switched off.
+- **Never takes focus.** The shortcut goes to the window you were in.
+- **Only without a keyboard.** With this setting on (Settings → Look), the capsule hides while a keyboard is attached. The tray icon shows or hides it at any moment.
+- **Snip without the capsule in the shot.** The Snip key hides the capsule while you select the area.
+- **Four keys in sight.** The rest scroll under your finger, and the **+** at the foot opens the editor.
+- **Stays where you put it.** Drag the capsule by its handle to the left, right or top edge; it stays there, even after a rotation.
+- **Like the taskbar, but for fingers.** Without a keyboard the keys spread apart. A running program's key carries a mark, and a second tap brings its window forward or minimizes it; Tapka never closes anything.
+- **Your look.** Dark, light or system theme, any accent, three sizes, Russian and English. Updates are quiet, once per start, and can be switched off.
 
 Ready-made Windows actions: snip an area, paste, copy, undo, voice typing, task view, show desktop, File Explorer, Settings, on-screen keyboard, clipboard history, emoji, louder, quieter, mute, play/pause, next track.
 
 ## Your own keys
 
-Tap the **+** at the foot of the capsule, or open the settings from the tray icon.
+Tap the **+** on the capsule, or open the settings from the tray icon.
 
 <p align="center"><img src="assets/settings.png" width="760" alt="The settings window"></p>
 
 **Add** offers four kinds of keys:
 
-| Kind | What you do |
-|---|---|
-| Program | Pick it from the list of installed programs. The name and the icon come from the program itself. |
-| Site, file or folder | Type an address or choose a file or a folder. |
-| Keyboard shortcut | Press it on a keyboard, or build it with the Ctrl, Shift, Alt and Win buttons when there is no keyboard. |
-| Windows action | Pick one of the ready-made actions. |
+- **Program:** pick an installed one; its name and icon come along.
+- **Site, file or folder:** type an address, or choose a file or folder.
+- **Keyboard shortcut:** press it, or build it with the Ctrl, Shift, Alt and Win buttons.
+- **Windows action:** one of the ready-made ones.
 
-Drag a key by the dots to change the order; the pencil changes its name, hint and icon; the bin removes it, with an Undo.
+Drag keys by the dots to reorder; the pencil edits name, hint and icon; the bin removes, with an Undo.
 
 ### The settings file
 
-Everything lives in one file, `settings.json`, in `%APPDATA%\sargares22.tapka`; the settings window opens it for you (General → Settings file). You, a script or an AI agent can edit it by hand: the panel picks the change up within a second, and the settings window shows the same list.
+Everything lives in `%APPDATA%\sargares22.tapka\settings.json`; the settings window opens it for you (General → Settings file). Edit it by hand, with a script or through an AI agent: the panel picks changes up within a second.
 
 ```json
 {
@@ -78,38 +71,31 @@ Everything lives in one file, `settings.json`, in `%APPDATA%\sargares22.tapka`; 
   "accent": "#8ab4ff",
   "items": [
     { "name": "Snip", "icon": "snip", "hint": "Select a screen area", "action": "hotkey", "keys": "win+shift+s" },
-    { "name": "Notes", "action": "open", "target": "C:\\Tools\\notes.exe" },
     { "name": "Mail", "icon": "chat", "action": "open", "target": "https://mail.example.com" }
   ]
 }
 ```
 
-- `action` is `open` (with `target`: a program, a file, a folder, an address, or a `shell:AppsFolder\…` app address) or `hotkey` (with `keys`, like `ctrl+shift+k`).
-- `icon` is a built-in name (`snip`, `paste`, `copy`, `undo`, `mic`, `tasks`, `desktop`, `folder`, `gear`, `keyboard`, `terminal`, `chat`, `browser`) or a PNG/SVG file from the `icons` folder next to the settings file. Without it, a program shows its own icon and anything else shows its first letter.
-- `top` is where the capsule starts along its edge, from 0 to 1.
-- `tablet_only`, when `true`, hides the capsule while a keyboard is attached.
-- Two things can only be set here: the exact `top`, and the `lit` rule below.
-
-A broken item is skipped and the rest keep working; a broken file changes nothing, and the tray tooltip says what is wrong.
+- `action`: `open` with `target` (program, file, folder, address or `shell:AppsFolder\…`), or `hotkey` with `keys`, like `ctrl+shift+k`.
+- `icon`: a built-in icon (all are in the editor) or a PNG or SVG from the `icons` folder next to the file. Without it, a program shows its own icon, anything else its first letter.
+- `top` (0 to 1) places the capsule along its edge; `tablet_only: true` hides it while a keyboard is attached. The exact `top` and the `lit` rule are file-only.
+- A broken item is skipped, and the tray tooltip says what is wrong.
 
 ## Recipes
 
-Tapka is not tied to any other program. These are examples of what people connect.
+Tapka is not tied to any other program. Here is what people connect:
 
-**A dictation program (Handy and the like).** Add a *Keyboard shortcut* key with the shortcut your dictation program listens to, for example `ctrl+space`. To make the key glow while it records, add a `lit` rule to that item in the settings file, naming the program and the title of the window it shows while recording:
+- **Dictation (Handy and the like).** Add a *Keyboard shortcut* key with the shortcut it listens to, say `ctrl+space`. To make the key glow while recording, give the item a `lit` rule: the program and the title of its recording window.
 
-```json
-{ "name": "Dictation", "icon": "mic", "action": "hotkey", "keys": "ctrl+space",
-  "lit": { "program": "handy.exe", "window": "Recording" } }
-```
+  ```json
+  { "name": "Dictation", "icon": "mic", "action": "hotkey", "keys": "ctrl+space",
+    "lit": { "program": "handy.exe", "window": "Recording" } }
+  ```
 
-**AI chats.** Installed apps (ChatGPT, Claude, Copilot and so on): *Add → Program* and pick the app. Web chats: *Add → Site, file or folder* and paste the address. A second tap on an app's key brings its window forward, like on the taskbar.
-
-**A folder you live in.** *Add → Site, file or folder → Folder…*
-
-**Deep links: a program opened right where you need it.** The *Site, file or folder* field takes any address Windows knows how to open, not only `https://`. So a key can be a link into a program: `ms-settings:bluetooth` opens Bluetooth in Settings, `ms-availablenetworks:` shows the Wi‑Fi list, `ms-actioncenter:` opens notifications, `claude://code/new?folder=C:\Projects\mine` starts a new Claude Code session in that folder, `codex://threads/new?path=C:\Projects\mine` does the same for Codex, `tg://resolve?domain=name` opens a Telegram chat. Which schemes exist on your machine depends on what is installed; a long list lives at [awesome-deeplinks](https://github.com/f/awesome-deeplinks).
-
-**A shortcut of another program.** If an action has a keyboard shortcut made of Ctrl, Shift, Alt, Win and a letter, a digit, F1–F24 or a navigation key, a media key, a period or a comma, it can be a key: mute in a call, a screenshot tool. The numpad is not supported yet. Shortcuts do not reach programs running as administrator: Windows does not let an ordinary program send keys to them.
+- **AI chats.** Add an app (ChatGPT, Claude, Copilot) as *Program*, a web chat as *Site, file or folder*.
+- **A folder you live in.** *Add → Site, file or folder → Folder…*
+- **Deep links.** The address field takes any link Windows opens: `ms-settings:bluetooth`, `ms-availablenetworks:` (Wi‑Fi), `ms-actioncenter:` (notifications), `claude://code/new?folder=C:\Projects\mine` and `codex://threads/new?path=C:\Projects\mine` (a new session in that folder), `tg://resolve?domain=name`. Schemes depend on what is installed; see [awesome-deeplinks](https://github.com/f/awesome-deeplinks).
+- **Another program's shortcut.** Ctrl, Shift, Alt, Win plus a letter, digit, F1–F24, navigation key, media key, period or comma all work. The numpad is not supported yet, and keys do not reach programs running as administrator.
 
 ## Privacy
 
@@ -123,7 +109,7 @@ What it does not do: it does not record what you type, does not send window titl
 
 ## Build it yourself
 
-You need Rust with the MSVC toolchain and Node.js (for the Tauri command-line tool).
+You need Rust with the MSVC toolchain and Node.js.
 
 ```
 cargo test
@@ -131,10 +117,8 @@ node --test scripts/check-page.mjs
 npx @tauri-apps/cli@2 build --target aarch64-pc-windows-msvc --no-bundle
 ```
 
-The exe is in `target/aarch64-pc-windows-msvc/release` (use `x86_64-pc-windows-msvc` for Intel and AMD). Installers with signed update files are made by `scripts/make-release.sh` and need the project's update key, so a build of your own does not update itself.
-
-Rust, Tauri 2 and WebView2; one binary, two pages, one settings file.
+The exe lands in `target/aarch64-pc-windows-msvc/release`; use `x86_64-pc-windows-msvc` for Intel and AMD. Your own build does not update itself: signed updates come from `scripts/make-release.sh` with the project's key.
 
 ## License
 
-[MIT](LICENSE). The program comes as is, with no warranty of any kind: if something breaks, it is yours to keep. The built-in icons are drawn for this project; see [glyphs/NOTICE.md](glyphs/NOTICE.md).
+[MIT](LICENSE), no warranty; the icons are drawn for this project, see [glyphs/NOTICE.md](glyphs/NOTICE.md).
