@@ -39,7 +39,7 @@ Some antivirus programs are wary of anything that sends key presses, and Tapka d
 - **Snip without the capsule in the shot.** The Snip key hides the capsule while you select the area and brings it back when you are done.
 - **Behaves like the taskbar.** A key whose program is running carries a mark; tapping it again brings the window forward or minimizes it. Tapka never closes anything.
 - **Four keys in sight, the rest a scroll away.** The list scrolls under your finger; a faded edge says there is more. A small **+** at the foot of the capsule opens the editor.
-- **Goes where you carry it.** Drag the capsule by its handle to the left, right or top edge. After a screen rotation or a resolution change it is back at its edge.
+- **Stays where you put it.** Drag the capsule by its handle to the left, right or top edge. After a screen rotation or a resolution change it is back at its edge.
 - **Wider apart without a keyboard.** When the keyboard is detached, the keys stand further apart for fingers.
 - **Your look.** Dark, light or the same as Windows; any accent colour; three sizes.
 - **Russian and English.** Follows the language of Windows; can be switched in the settings.
@@ -66,7 +66,7 @@ Drag a key by the dots to change the order; the pencil changes its name, hint an
 
 ### The settings file
 
-Everything lives in one file, `settings.json`, which the settings window opens for you (General → Settings file). You, a script or an AI agent can edit it by hand: the panel picks the change up within a second, and the settings window shows the same list.
+Everything lives in one file, `settings.json`, in `%APPDATA%\sargares22.tapka`; the settings window opens it for you (General → Settings file). You, a script or an AI agent can edit it by hand: the panel picks the change up within a second, and the settings window shows the same list.
 
 ```json
 {
@@ -105,7 +105,7 @@ Tapka is not tied to any other program. These are examples of what people connec
 
 **A folder you live in.** *Add → Site, file or folder → Folder…*
 
-**Any shortcut of any program.** If it has a keyboard shortcut, it can be a key: mute in a call, a screenshot tool, "next track".
+**A shortcut of another program.** If an action has a keyboard shortcut made of Ctrl, Shift, Alt, Win and a letter, a digit, F1–F24 or a navigation key, it can be a key: mute in a call, a screenshot tool. Punctuation, numpad and media keys are not supported yet. Shortcuts do not reach programs running as administrator: Windows does not let an ordinary program send keys to them.
 
 ## Privacy
 

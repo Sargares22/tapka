@@ -439,11 +439,18 @@ fn carry_step(app: &AppHandle, x: i32, y: i32) -> (i32, i32) {
     (cx - ox, cy - oy)
 }
 
-/// Replaces the settings file in one step, so the watcher never reads it half written.
-fn write_settings(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+/// Changes the settings file: reads it, lets `change` make the new text, and replaces the file in
+/// one step, so the watcher never reads it half written. One change at a time: the settings
+/// window, a carry and the editor may all save at the same moment, and none may write over what
+/// another has just saved.
+fn change_settings(app: &AppHandle, change: impl FnOnce(&str) -> Option<String>) -> Result<(), String> {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let path = settings_path(app).ok_or("no settings path")?;
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let text = change(&text).ok_or("the settings file is not a JSON object")?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)
+    std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
 }
 
 /// The drag ended: the capsule docks. Dropped close to the top of the screen it lies down along
@@ -468,15 +475,12 @@ fn carry_end(app: &AppHandle) {
         s.top = top;
         s.clone()
     };
-    if let Some(path) = settings_path(app) {
-        let saved = std::fs::read_to_string(&path).ok().and_then(|text| {
-            let text = config::with_field(&text, "edge", json!(config::edge_name(edge)))?;
-            config::with_field(&text, "top", config::share(top))
-        });
-        match saved.map(|text| write_settings(&path, &text)) {
-            Some(Ok(())) => {}
-            _ => applog(app, "settings: cannot save the capsule's place"),
-        }
+    let saved = change_settings(app, |text| {
+        let text = config::with_field(text, "edge", json!(config::edge_name(edge)))?;
+        config::with_field(&text, "top", config::share(top))
+    });
+    if let Err(why) = saved {
+        applog(app, &format!("settings: cannot save the capsule's place: {why}"));
     }
     applog(app, &format!("moved: {edge:?} edge, along {top:.3}"));
     place_capsule(app, &settings);
@@ -527,10 +531,7 @@ fn get_settings(app: AppHandle) -> Value {
 
 /// Writes one field of the settings file and applies it at once.
 fn write_field(app: &AppHandle, key: &str, value: Value) -> Result<(), String> {
-    let path = settings_path(app).ok_or("no settings path")?;
-    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let text = config::with_field(&text, key, value).ok_or("the settings file is not a JSON object")?;
-    write_settings(&path, &text).map_err(|e| e.to_string())?;
+    change_settings(app, |text| config::with_field(text, key, value))?;
     reload_settings(app);
     // The windows redraw even when nothing the panel itself uses has changed
     let _ = app.emit("reload", ());
@@ -576,16 +577,11 @@ fn icon_of(target: String) -> Option<String> {
 #[tauri::command(async)]
 fn import_icon(app: AppHandle, path: String) -> Result<String, String> {
     let from = std::path::Path::new(&path);
-    let name = from.file_name().and_then(|n| n.to_str()).ok_or("no file name")?.to_string();
-    if !matches!(name.rsplit_once('.').map(|(_, ext)| ext.to_lowercase()).as_deref(), Some("png" | "svg")) {
+    if !matches!(path.rsplit_once('.').map(|(_, ext)| ext.to_lowercase()).as_deref(), Some("png" | "svg")) {
         return Err("PNG or SVG only".into());
     }
-    let dir = data_dir(&app).ok_or("no data folder")?.join("icons");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    if from != dir.join(&name) {
-        std::fs::copy(from, dir.join(&name)).map_err(|e| e.to_string())?;
-    }
-    Ok(name)
+    let icons = data_dir(&app).ok_or("no data folder")?.join("icons");
+    config::keep_icon(from, &icons).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -775,6 +771,9 @@ fn settings_path(app: &AppHandle) -> Option<std::path::PathBuf> {
 /// Reads settings.json over the current settings and redraws the capsule. An invalid file keeps
 /// the items that are on screen; the reason goes to the log and stays in `AppState::error`.
 fn reload_settings(app: &AppHandle) {
+    // One reading at a time: a thread that read the file earlier must not apply it later
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let Some(path) = settings_path(app) else { return };
     let state = app.state::<AppState>();
     if state.carry.lock().unwrap().is_some() {
@@ -986,7 +985,15 @@ fn main() {
                 let app = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(5));
-                    tauri::async_runtime::block_on(look_for_update(&app));
+                    // The switch may have been turned off in these seconds. The file is asked, not
+                    // the memory: a carry in progress puts off re-reading the file
+                    let on = settings_path(&app)
+                        .and_then(|path| std::fs::read_to_string(path).ok())
+                        .and_then(|text| config::parse(text.trim_start_matches('\u{feff}')).ok())
+                        .is_some_and(|(settings, _)| settings.updates);
+                    if on {
+                        tauri::async_runtime::block_on(look_for_update(&app));
+                    }
                 });
             }
             Ok(())

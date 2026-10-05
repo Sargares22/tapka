@@ -23,7 +23,7 @@ function renderedDom(items, script = '', ms = 4000, page = 'index.html', setting
   assert.ok(browser, 'Google Chrome not found');
   const work = mkdtempSync(join(tmpdir(), 'tapka-check-'));
   try {
-    const stub = `<script>window.__calls=[];window.__on={};window.__view={items:${JSON.stringify(items)},cell:54,tablet:false,edge:'right',theme:'dark',accent:'#8ab4ff',add:['Добавить','Открыть редактор пунктов']};window.__settings=${JSON.stringify(settings)};window.__TAURI__={core:{invoke:async(c,a)=>{window.__calls.push([c,a]);return c==='get_view'?window.__view:c==='get_settings'?window.__settings:null}},event:{listen(n,cb){window.__on[n]=cb}}}</script>`;
+    const stub = `<script>window.__calls=[];window.__on={};window.__view={items:${JSON.stringify(items)},cell:54,tablet:false,edge:'right',theme:'dark',accent:'#8ab4ff',add:['Добавить','Открыть редактор пунктов']};window.__settings=${JSON.stringify(settings)};window.__TAURI__={core:{invoke:async(c,a)=>{window.__calls.push([c,a]);return c==='get_view'?window.__view:c==='get_settings'?JSON.parse(JSON.stringify(window.__settings)):null}},event:{listen(n,cb){window.__on[n]=cb}}}</script>`;
     const html = readFileSync(join(root, 'ui', page), 'utf8')
       .replace('<head>', '<head>' + stub)
       .replace('</body>', `<script>${script}</script></body>`);
@@ -232,6 +232,14 @@ const settings = {
     { raw: { name: 'Заметки', action: 'open', target: 'C:\\Tools\\notes.exe' }, icon: PNG, glyph: null, problem: null },
     { raw: { name: 'Потом', action: 'script' }, icon: null, glyph: null, problem: 'unknown action "script"' },
   ],
+  // What a hand may leave in the file: not an object, a name that is not text
+  odd: [
+    { raw: null, icon: null, glyph: null, problem: 'no name' },
+    { raw: 'text', icon: null, glyph: null, problem: 'no name' },
+    { raw: { name: 5, action: 'hotkey', keys: 7, hint: { toString: 0 } }, icon: null, glyph: null, problem: 'no name' },
+    { raw: { name: 'Крив', action: 'open', target: 'x', hint: { toString: 0 } }, icon: null, glyph: null, problem: null },
+    { raw: { name: 'Цел', action: 'open', target: 'x' }, icon: null, glyph: null, problem: null },
+  ],
   scale: 1, edge: 'right', theme: 'dark', accent: '#8ab4ff', lang: 'system', russian: true, autostart: false, updates: true,
   version: '1.0.0', error: null, intro: true,
   presets: [{ id: 'snip', item: { name: 'Снимок', icon: 'snip', hint: 'Выделить область экрана', action: 'hotkey', keys: 'win+shift+s' } },
@@ -243,6 +251,8 @@ const editing = `(async () => {
   const $ = id => document.getElementById(id);
   const calls = name => window.__calls.filter(c => c[0] === name).map(c => c[1]);
   const last = name => calls(name).pop();
+  // The stand-in for Rust keeps the file as it was: each step starts from that list again
+  const again = async () => { window.__on.reload(); await sleep(20); };
   await sleep(50);
   const out = {};
   const rows = () => [...document.querySelectorAll('#items .row')];
@@ -268,11 +278,13 @@ const editing = `(async () => {
   document.querySelectorAll('#body .pick')[1].click();
   out.added = last('save_items').items.map(i => i.name); out.addedItem = last('save_items').items[4];
   out.closedAfterAdd = !$('shade').classList.contains('on');
+  await again();
   // A site, file or folder: an address and a name
   $('add').click(); document.querySelectorAll('#body .pick')[1].click();
   const inputs = () => [...document.querySelectorAll('#body input[type=text]')];
   inputs()[0].value = 'https://example.com'; inputs()[1].value = 'Сайт'; document.querySelector('#foot .accent').click();
   out.site = last('save_items').items[4];
+  await again();
   // A shortcut: put together with the buttons, or pressed on a keyboard
   $('add').click(); document.querySelectorAll('#body .pick')[2].click();
   const chips = () => [...document.querySelectorAll('#body .chip')];
@@ -280,16 +292,19 @@ const editing = `(async () => {
   const key = document.querySelector('#body select'); key.value = 'k'; key.onchange();
   document.querySelector('#foot .accent').click();
   out.keysByButtons = last('save_items').items[4];
+  await again();
   $('add').click(); document.querySelectorAll('#body .pick')[2].click();
   window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F5', ctrlKey: true, shiftKey: true, bubbles: true }));
   document.querySelector('#foot .accent').click();
   out.keysPressed = last('save_items').items[4].keys;
+  await again();
   // Editing keeps what the window does not show: the lit rule stays in the item
   rows()[1].querySelectorAll('.icon-btn')[0].click();
   inputs()[0].value = 'Запись'; inputs()[1].value = 'Подсказка';
   document.querySelector('#foot .accent').click();
   out.edited = last('save_items').items[1];
   out.editedOthers = last('save_items').items.map(i => i.name);
+  await again();
   // Removing takes the item out and offers to put it back
   rows()[0].querySelectorAll('.icon-btn')[1].click();
   out.removed = last('save_items').items.map(i => i.name);
@@ -305,6 +320,13 @@ const editing = `(async () => {
   window.__settings = { ...window.__settings, russian: false, intro: false, theme: 'light' }; window.__on.reload(); await sleep(50);
   out.navEn = [...document.querySelectorAll('.nav span')].map(s => s.textContent);
   out.addEn = $('add').textContent; out.introGone = $('intro').hidden;
+  // A file with odd items: the list is still drawn, and an odd item can be removed
+  window.__settings = { ...window.__settings, items: window.__settings.odd }; window.__on.reload(); await sleep(50);
+  out.oddRows = rows().map(r => r.querySelector('.label span').textContent);
+  rows()[0].querySelectorAll('.icon-btn')[0].click(); out.oddEditOpens = $('shade').classList.contains('on');
+  rows()[0].querySelectorAll('.icon-btn')[1].click(); out.oddRemoved = last('save_items').items.length;
+  // Two removals in a hurry, before Rust has answered the first: the second starts from the first
+  rows()[0].querySelectorAll('.icon-btn')[1].click(); out.oddRemovedTwice = last('save_items').items.length;
   document.documentElement.dataset.check = JSON.stringify(out);
 })();`;
 const set = found(renderedDom([], editing, 4000, 'settings.html', settings));
@@ -345,6 +367,13 @@ test('an item is edited, removed, restored and moved; fields the window does not
   assert.equal(set.toast, true);
   assert.deepEqual(set.restored, ['Снимок', 'Диктовка', 'Заметки', 'Потом']);
   assert.deepEqual(set.moved, ['Диктовка', 'Снимок', 'Заметки', 'Потом']);
+});
+
+test('odd items in the file do not break the list', () => {
+  assert.deepEqual(set.oddRows, ['—', '—', '—', 'Крив', 'Цел']);
+  assert.equal(set.oddEditOpens, false);
+  assert.equal(set.oddRemoved, 4);
+  assert.equal(set.oddRemovedTwice, 3);
 });
 
 test('the settings window speaks Russian and English', () => {

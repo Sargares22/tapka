@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1
+
+- Settings saved at the same moment from two places no longer overwrite each other.
+- The editor lists and lets you remove items that were typed into the settings file wrongly, instead of failing on them.
+- An imported icon no longer replaces another picture with the same file name.
+- "Start with Windows" is written through the registry API, and removing Tapka removes the entry.
+- Turning update checks off right after start is respected.
+- The **+** is a small quiet mark at the foot of the capsule.
+
 ## 1.0.0
 
 The first public release.

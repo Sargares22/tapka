@@ -95,10 +95,10 @@ pub const PRESETS: [Preset; 10] = [
     Preset { id: "copy", icon: "copy", action: ("hotkey", "ctrl+c"), ru: ("Копировать", "Скопировать выделенное в буфер"), en: ("Copy", "Copy the selection to the clipboard") },
     Preset { id: "undo", icon: "undo", action: ("hotkey", "ctrl+z"), ru: ("Отменить", "Отменить последнее действие в активном окне"), en: ("Undo", "Undo the last action in the active window") },
     Preset { id: "voice", icon: "mic", action: ("hotkey", "win+h"), ru: ("Голосовой ввод", "Диктовка Windows в поле, где стоит курсор"), en: ("Voice typing", "Windows dictation into the field with the cursor") },
-    Preset { id: "tasks", icon: "tasks", action: ("hotkey", "win+tab"), ru: ("Все окна", "Представление задач: открытые окна и рабочие столы"), en: ("Task view", "All open windows and desktops") },
+    Preset { id: "tasks", icon: "tasks", action: ("hotkey", "win+tab"), ru: ("Представление задач", "Открытые окна и рабочие столы"), en: ("Task view", "All open windows and desktops") },
     Preset { id: "desktop", icon: "desktop", action: ("hotkey", "win+d"), ru: ("Рабочий стол", "Свернуть все окна или вернуть их"), en: ("Desktop", "Minimize all windows or bring them back") },
-    Preset { id: "explorer", icon: "folder", action: ("hotkey", "win+e"), ru: ("Проводник", "Открыть окно проводника"), en: ("Explorer", "Open a File Explorer window") },
-    Preset { id: "settings", icon: "gear", action: ("open", "ms-settings:"), ru: ("Параметры", "Открыть параметры Windows"), en: ("Settings", "Open Windows Settings") },
+    Preset { id: "explorer", icon: "folder", action: ("hotkey", "win+e"), ru: ("Проводник", "Открыть окно Проводника"), en: ("File Explorer", "Open a File Explorer window") },
+    Preset { id: "settings", icon: "gear", action: ("open", "ms-settings:"), ru: ("Параметры", "Открыть Параметры Windows"), en: ("Settings", "Open Windows Settings") },
     Preset { id: "keyboard", icon: "keyboard", action: ("hotkey", "win+ctrl+o"), ru: ("Клавиатура", "Показать или убрать экранную клавиатуру"), en: ("Keyboard", "Show or hide the on-screen keyboard") },
 ];
 
@@ -319,6 +319,35 @@ pub fn migrate(old: &Path, new: &Path) -> std::io::Result<Vec<String>> {
     Ok(copied)
 }
 
+/// Copies a picture into the icons folder and returns the file name it got there. A file of the
+/// same name with other contents is never replaced: the new one gets `-2`, `-3` and so on. The
+/// same picture brought in again is not copied twice.
+pub fn keep_icon(from: &Path, icons: &Path) -> std::io::Result<String> {
+    let name = from.file_name().and_then(|n| n.to_str()).ok_or(std::io::ErrorKind::InvalidInput)?;
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+    use std::io::Write;
+    let bytes = std::fs::read(from)?;
+    std::fs::create_dir_all(icons)?;
+    for n in 1.. {
+        let candidate = if n == 1 { name.to_string() } else { format!("{stem}-{n}.{ext}") };
+        // The file is made only if the name is free at this very moment, so two imports at once
+        // cannot both take it
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(icons.join(&candidate)) {
+            Ok(mut file) => {
+                file.write_all(&bytes)?;
+                return Ok(candidate);
+            }
+            Err(taken) if taken.kind() == std::io::ErrorKind::AlreadyExists => {
+                if std::fs::read(icons.join(&candidate))? == bytes {
+                    return Ok(candidate);
+                }
+            }
+            Err(other) => return Err(other),
+        }
+    }
+    unreachable!()
+}
+
 /// Re-reads the settings text over the current settings. An invalid file changes nothing and
 /// comes back as the error; a valid one replaces the settings and lists its skipped items.
 pub fn reload(current: &Settings, text: &str) -> (Settings, Vec<String>, Option<String>) {
@@ -397,6 +426,29 @@ mod tests {
     }
 
     #[test]
+    fn an_imported_icon_never_replaces_another_picture() {
+        let dir = std::env::temp_dir().join(format!("tapka-icons-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (a, b, icons) = (dir.join("a"), dir.join("b"), dir.join("icons"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(a.join("icon.png"), [1]).unwrap();
+        std::fs::write(b.join("icon.png"), [2]).unwrap();
+        assert_eq!(keep_icon(&a.join("icon.png"), &icons).unwrap(), "icon.png");
+        // Another picture under the same name gets a name of its own; the first one stays
+        assert_eq!(keep_icon(&b.join("icon.png"), &icons).unwrap(), "icon-2.png");
+        assert_eq!(std::fs::read(icons.join("icon.png")).unwrap(), [1]);
+        assert_eq!(std::fs::read(icons.join("icon-2.png")).unwrap(), [2]);
+        // The same pictures again: no third file
+        assert_eq!(keep_icon(&a.join("icon.png"), &icons).unwrap(), "icon.png");
+        assert_eq!(keep_icon(&b.join("icon.png"), &icons).unwrap(), "icon-2.png");
+        assert_eq!(std::fs::read_dir(&icons).unwrap().count(), 2);
+        // A picture already in the icons folder keeps its name
+        assert_eq!(keep_icon(&icons.join("icon-2.png"), &icons).unwrap(), "icon-2.png");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn migrate_copies_settings_and_icons_once() {
         let dir = std::env::temp_dir().join(format!("tapka-migrate-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -442,7 +494,7 @@ mod tests {
     fn the_default_file_has_windows_actions_in_the_language_asked_for() {
         let names = |russian| -> Vec<String> { parse(&default_text(russian)).unwrap().0.items.into_iter().map(|i| i.name).collect() };
         assert_eq!(names(true), ["Снимок", "Вставить", "Голосовой ввод", "Проводник", "Параметры"]);
-        assert_eq!(names(false), ["Snip", "Paste", "Voice typing", "Explorer", "Settings"]);
+        assert_eq!(names(false), ["Snip", "Paste", "Voice typing", "File Explorer", "Settings"]);
         let text = default_text(false);
         assert!(text.starts_with("{\n  \"scale\": 1.0,\n  \"top\": 0.3,\n  \"items\": [\n    { \"name\": \"Snip\", \"icon\": \"snip\", "), "{text}");
         let (s, skipped) = parse(&text).unwrap();

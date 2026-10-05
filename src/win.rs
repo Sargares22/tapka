@@ -109,8 +109,10 @@ pub fn set_region(hwnd: isize, rects: &[(i32, i32, i32, i32)]) {
             CombineRgn(Some(region), Some(region), Some(part), RGN_OR);
             let _ = DeleteObject(part.into());
         }
-        // The system owns the region after the call
-        let _ = SetWindowRgn(HWND(hwnd as _), Some(region), true);
+        // The system owns the region after a call that worked; one it refused is still ours
+        if SetWindowRgn(HWND(hwnd as _), Some(region), true) == 0 {
+            let _ = DeleteObject(region.into());
+        }
     }
 }
 

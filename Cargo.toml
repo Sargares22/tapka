@@ -1,6 +1,6 @@
 [package]
 name = "tapka"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 license = "WTFPL"
 authors = ["Sargares22"]
@@ -30,6 +30,7 @@ windows = { version = "0.62", features = [
   "Win32_Storage_Packaging_Appx",
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
+  "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
