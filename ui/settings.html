@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tapka</title>
+<style>
+  /* The settings window, in the manner of Windows 11's own programs: sections on the left,
+     rounded cards on the right, the same theme and accent as the capsule. */
+  :root{
+    --bg:#202020;--card:#2b2b2b;--card-hot:#323232;--line:#1d1d1d;--field:#373737;--field-line:#4a4a4a;
+    --ink:#fff;--ink-2:#c8c8c8;--ink-dim:#9a9a9a;--nav-hot:#2d2d2d;--shade:rgba(0,0,0,.5);--dialog:#2b2b2b;
+    --key:#1c1d22;--key-ink:#e6e8ee;--danger:#ff99a4;
+    --accent:#8ab4ff;--on-accent:#000;
+  }
+  :root[data-theme=light]{
+    --bg:#f3f3f3;--card:#fbfbfb;--card-hot:#f6f6f6;--line:#e5e5e5;--field:#fff;--field-line:#d0d0d0;
+    --ink:#1b1b1b;--ink-2:#444;--ink-dim:#6b6b6b;--nav-hot:#eaeaea;--shade:rgba(0,0,0,.3);--dialog:#f9f9f9;
+    --key:#fff;--key-ink:#2a2d34;--danger:#c42b1c;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.4 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;user-select:none}
+  button,input,select{font:inherit;color:inherit}
+  #app{display:flex;height:100%}
+
+  #side{flex:0 0 228px;padding:14px 8px;display:flex;flex-direction:column;gap:2px}
+  #brand{display:flex;align-items:center;gap:10px;padding:6px 10px 16px;font-weight:600}
+  #brand svg{width:28px;height:28px;flex:none}
+  .nav{position:relative;display:flex;align-items:center;gap:12px;height:38px;padding:0 12px;border:0;border-radius:5px;background:none;text-align:left;cursor:default}
+  .nav:hover{background:var(--nav-hot)}
+  .nav.on{background:var(--nav-hot)}
+  .nav.on::before{content:"";position:absolute;left:0;top:11px;bottom:11px;width:3px;border-radius:2px;background:var(--accent)}
+  .nav svg{width:18px;height:18px;flex:none}
+
+  #pane{flex:1;min-width:0;overflow:auto;padding:22px 28px 28px}
+  section{display:none;max-width:760px}
+  section.on{display:block}
+  h1{font:600 26px/1.2 "Segoe UI Variable Display","Segoe UI",sans-serif;margin:0 0 18px}
+  .head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
+  .head h1{margin:0}
+  h2{font-size:14px;font-weight:600;margin:22px 0 8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:7px;margin-bottom:6px}
+  .row{display:flex;align-items:center;gap:16px;min-height:62px;padding:10px 16px}
+  .row+.row{border-top:1px solid var(--line)}
+  .label{flex:1;min-width:0}
+  .label small,.sub{display:block;color:var(--ink-dim);font-size:12px}
+  .note{padding:14px 16px;border-left:3px solid var(--accent);border-radius:7px;color:var(--ink-2);line-height:1.5}
+  .text{padding:14px 16px;color:var(--ink-2);line-height:1.55}
+  .text p{margin:0 0 8px}.text p:last-child{margin:0}
+
+  .btn{height:32px;padding:0 14px;border:1px solid var(--field-line);border-radius:5px;background:var(--field);white-space:nowrap;cursor:default}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.accent{background:var(--accent);border-color:transparent;color:var(--on-accent);font-weight:600}
+  .btn:disabled{opacity:.45}
+  .icon-btn{width:34px;height:34px;border:0;border-radius:5px;background:none;display:grid;place-items:center;cursor:default;flex:none}
+  .icon-btn:hover{background:var(--card-hot);filter:brightness(1.15)}
+  .icon-btn svg{width:17px;height:17px}
+  select,input[type=text]{height:32px;padding:0 10px;border:1px solid var(--field-line);border-radius:5px;background:var(--field);outline:none;user-select:text}
+  select{min-width:170px}
+  input[type=text]{width:100%}
+  input[type=text]:focus,select:focus{border-bottom:2px solid var(--accent)}
+  .seg{display:flex;border:1px solid var(--field-line);border-radius:5px;overflow:hidden}
+  .seg button{height:30px;min-width:44px;padding:0 12px;border:0;background:var(--field);cursor:default}
+  .seg button+button{border-left:1px solid var(--field-line)}
+  .seg button.on{background:var(--accent);color:var(--on-accent);font-weight:600}
+  .switch{position:relative;flex:none;width:40px;height:20px;border-radius:10px;border:1px solid var(--ink-dim);background:none;cursor:default;padding:0}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:var(--ink-2);transition:left .12s}
+  .switch.on{background:var(--accent);border-color:var(--accent)}
+  .switch.on::after{left:23px;background:var(--on-accent)}
+  .swatches{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .swatch{width:26px;height:26px;border-radius:50%;border:2px solid transparent;padding:0;cursor:default;outline:1px solid var(--field-line)}
+  .swatch.on{border-color:var(--ink)}
+  input[type=color]{width:36px;height:30px;padding:0;border:1px solid var(--field-line);border-radius:5px;background:var(--field)}
+
+  /* An item as the capsule shows it: a key with its picture */
+  .key{flex:none;width:38px;height:38px;border-radius:11px;background:var(--key);color:var(--key-ink);box-shadow:inset 0 0 0 1px rgba(128,128,128,.25);display:grid;place-items:center;font-weight:600;font-size:15px}
+  .key svg{width:20px;height:20px}
+  .key img{width:22px;height:22px;object-fit:contain;pointer-events:none}
+  #items .row{padding-left:6px;gap:10px;background:var(--card)}
+  #items .row.carried{position:relative;z-index:2;box-shadow:0 6px 18px var(--shade);border-radius:7px;border-top-color:transparent}
+  .grip{flex:none;width:30px;height:38px;display:grid;place-items:center;color:var(--ink-dim);touch-action:none;cursor:grab}
+  .grip svg{width:14px;height:14px}
+  .problem{color:var(--danger)}
+  .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  #shade{position:fixed;inset:0;background:var(--shade);display:none;place-items:center;padding:20px}
+  #shade.on{display:grid}
+  #dialog{width:min(520px,100%);max-height:100%;display:flex;flex-direction:column;background:var(--dialog);border:1px solid var(--line);border-radius:9px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  #dialog header{display:flex;align-items:center;gap:6px;padding:14px 12px 8px 18px;font:600 18px "Segoe UI Variable Display","Segoe UI",sans-serif}
+  #dialog header span{flex:1}
+  #body{padding:6px 18px 6px;overflow:auto;display:flex;flex-direction:column;gap:12px}
+  #dialog footer{display:flex;justify-content:flex-end;gap:8px;padding:14px 18px}
+  #dialog footer:empty{padding:6px}
+  .field label{display:block;margin-bottom:5px;color:var(--ink-2);font-size:13px}
+  .inline{display:flex;gap:8px;align-items:center}
+  .pick{display:flex;align-items:center;gap:12px;width:100%;min-height:54px;padding:8px 10px;border:0;border-radius:6px;background:none;text-align:left;cursor:default}
+  .pick:hover{background:var(--card-hot)}
+  .pick .label b{display:block;font-weight:400}
+  .list{display:flex;flex-direction:column;gap:2px;margin:0 -8px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{height:32px;min-width:52px;padding:0 12px;border:1px solid var(--field-line);border-radius:5px;background:var(--field);cursor:default}
+  .chip.on{background:var(--accent);border-color:transparent;color:var(--on-accent);font-weight:600}
+  .glyphs{display:flex;gap:6px;flex-wrap:wrap}
+  .glyphs button{border:2px solid transparent;border-radius:13px;padding:0;background:none;cursor:default}
+  .glyphs button.on{border-color:var(--accent)}
+  #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);display:none;align-items:center;gap:14px;background:var(--dialog);border:1px solid var(--field-line);border-radius:7px;padding:8px 10px 8px 16px;box-shadow:0 8px 24px var(--shade)}
+  #toast.on{display:flex}
+</style>
+</head>
+<body>
+<div id="app">
+  <nav id="side">
+    <div id="brand">
+      <svg viewBox="0 0 256 256"><rect width="256" height="256" rx="56" fill="#364157"/><rect x="7" y="7" width="242" height="242" rx="49" fill="none" stroke="#8ab4ff" stroke-width="14"/><path d="M62 70H194V98H143V190H113V98H62Z" fill="#fff" stroke="#fff" stroke-width="8" stroke-linejoin="round"/></svg>
+      Tapka
+    </div>
+    <button class="nav on" data-s="items"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><path d="M16.75 13.5v6.5M13.5 16.75H20"/></svg><span data-t="nav_items"></span></button>
+    <button class="nav" data-s="look"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 4v16"/><path d="M12 8h6.9M12 12h8M12 16h6.9"/></svg><span data-t="nav_look"></span></button>
+    <button class="nav" data-s="general"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h9M17 17h3"/><circle cx="16" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="15" cy="17" r="2"/></svg><span data-t="nav_general"></span></button>
+    <button class="nav" data-s="about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><path d="M12 7.6v.1"/></svg><span data-t="nav_about"></span></button>
+  </nav>
+  <main id="pane">
+    <section id="s-items" class="on">
+      <div class="head"><h1 data-t="nav_items"></h1><button class="btn accent" id="add" data-t="add"></button></div>
+      <div class="card note" id="intro" hidden><span data-t="intro"></span></div>
+      <div class="card note problem" id="file-error" hidden></div>
+      <div class="card" id="items"></div>
+      <div class="sub" data-t="items_foot" style="padding:8px 4px"></div>
+    </section>
+    <section id="s-look">
+      <h1 data-t="nav_look"></h1>
+      <div class="card">
+        <div class="row"><div class="label"><span data-t="theme"></span><small data-t="theme_sub"></small></div>
+          <select id="theme"><option value="system" data-t="theme_system"></option><option value="dark" data-t="theme_dark"></option><option value="light" data-t="theme_light"></option></select></div>
+        <div class="row"><div class="label"><span data-t="accent"></span><small data-t="accent_sub"></small></div>
+          <div class="swatches" id="swatches"></div></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="label"><span data-t="size"></span><small data-t="size_sub"></small></div>
+          <div class="seg" id="scale"><button data-v="0.8">S</button><button data-v="1">M</button><button data-v="1.25">L</button></div></div>
+        <div class="row"><div class="label"><span data-t="edge"></span><small data-t="edge_sub"></small></div>
+          <div class="seg" id="edge"><button data-v="left" data-t="edge_left"></button><button data-v="top" data-t="edge_top"></button><button data-v="right" data-t="edge_right"></button></div></div>
+      </div>
+    </section>
+    <section id="s-general">
+      <h1 data-t="nav_general"></h1>
+      <div class="card">
+        <div class="row"><div class="label"><span data-t="lang"></span></div>
+          <select id="lang"><option value="system" data-t="lang_system"></option><option value="ru">Русский</option><option value="en">English</option></select></div>
+        <div class="row"><div class="label"><span data-t="autostart"></span><small data-t="autostart_sub"></small></div>
+          <button class="switch" id="autostart" role="switch"></button></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="label"><span data-t="updates"></span><small data-t="updates_sub"></small></div>
+          <button class="switch" id="updates" role="switch"></button></div>
+        <div class="row" id="update-row"><div class="label"><span id="update-state"></span><small id="update-sub"></small></div>
+          <button class="btn" id="update-check" data-t="update_check"></button><button class="btn accent" id="update-go" data-t="update_go" hidden></button></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="label"><span data-t="file"></span><small data-t="file_sub"></small></div>
+          <button class="btn" id="open-file" data-t="open"></button></div>
+        <div class="row"><div class="label"><span data-t="log"></span><small data-t="log_sub"></small></div>
+          <button class="btn" id="open-log" data-t="open"></button></div>
+        <div class="row"><div class="label"><span data-t="quit"></span><small data-t="quit_sub"></small></div>
+          <button class="btn" id="quit" data-t="quit_go"></button></div>
+      </div>
+    </section>
+    <section id="s-about">
+      <h1 data-t="nav_about"></h1>
+      <div class="card">
+        <div class="row"><div class="label"><span>Tapka</span><small data-t="about_sub"></small></div><span class="sub" id="version"></span></div>
+        <div class="row"><div class="label"><span data-t="license"></span><small data-t="license_sub"></small></div><span class="sub">WTFPL</span></div>
+        <div class="row"><div class="label"><span>GitHub</span><small>github.com/Sargares22/tapka</small></div><button class="btn" id="github" data-t="open"></button></div>
+      </div>
+      <h2 data-t="privacy"></h2>
+      <div class="card text"><p data-t="privacy_1"></p><p data-t="privacy_2"></p><p data-t="privacy_3"></p></div>
+    </section>
+  </main>
+</div>
+<div id="shade"><div id="dialog"><header><button class="icon-btn" id="back" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6 8.5 12l6 6"/></svg></button><span id="title"></span><button class="icon-btn" id="close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button></header><div id="body"></div><footer id="foot"></footer></div></div>
+<div id="toast"><span id="toast-text"></span><button class="btn" id="toast-undo" data-t="undo"></button></div>
+<script>
+  const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+  const $ = id => document.getElementById(id);
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+
+  const T = {
+    ru: {
+      nav_items: 'Пункты', nav_look: 'Вид', nav_general: 'Общие', nav_about: 'О программе',
+      add: 'Добавить', undo: 'Отменить', open: 'Открыть', save: 'Сохранить', cancel: 'Отмена',
+      intro: 'Tapka — сенсорная панель: клавиши в капсуле у края экрана запускают программы и отправляют сочетания клавиш в окно, где вы работали. Нажатия клавиш панель отправляет от вашего имени. Соберите свои пункты здесь, кнопкой «Добавить».',
+      items_foot: 'Порядок меняется перетаскиванием за точки слева. Тот же список лежит в файле настроек, его можно править руками.',
+      empty: 'Пунктов пока нет. Нажмите «Добавить».', file_error: 'Файл настроек не читается, пункты не изменены: ',
+      edit: 'Изменить', remove: 'Удалить', removed: 'Пункт удалён: ', broken: 'Пункт не работает: ',
+      theme: 'Тема', theme_sub: 'Капсула и это окно', theme_system: 'Как в Windows', theme_dark: 'Тёмная', theme_light: 'Светлая',
+      accent: 'Цвет акцента', accent_sub: 'Метки, подсветка и кнопки', accent_own: 'Свой цвет',
+      size: 'Размер капсулы', size_sub: 'Три размера клавиш', edge: 'Край экрана', edge_sub: 'Капсулу можно и перенести за ручку',
+      edge_left: 'Слева', edge_top: 'Сверху', edge_right: 'Справа',
+      lang: 'Язык', lang_system: 'Как в Windows', autostart: 'Автозагрузка', autostart_sub: 'Запускать панель вместе с Windows',
+      updates: 'Проверять обновления', updates_sub: 'Один запрос к GitHub при запуске панели',
+      update_check: 'Проверить', update_go: 'Обновить', update_none: 'Обновления не проверялись', update_off: 'Проверка обновлений выключена',
+      update_checking: 'Проверяю…', update_latest: 'Установлена последняя версия', update_found: 'Доступна версия ', update_failed: 'Проверить не удалось',
+      update_loading: 'Скачиваю и ставлю обновление…', update_current: 'Сейчас установлена ',
+      file: 'Файл настроек', file_sub: 'Все пункты и настройки в одном файле', log: 'Папка с журналом', log_sub: 'Журнал лежит только на этом компьютере',
+      quit: 'Выход', quit_sub: 'Закрыть панель до следующего запуска', quit_go: 'Выйти',
+      about_sub: 'Сенсорная панель для Windows 11', license: 'Лицензия', license_sub: 'Программа раздаётся как есть, без каких-либо гарантий',
+      privacy: 'Что панель делает с клавишами и окнами',
+      privacy_1: 'Отправляет нажатия клавиш в активное окно, когда вы касаетесь пункта с сочетанием клавиш.',
+      privacy_2: 'Дважды в секунду читает список окон и их заголовки, чтобы отметить запущенные программы. Если проверка обновлений включена, один раз за запуск обращается к GitHub.',
+      privacy_3: 'Не записывает ваши нажатия, не отправляет заголовки окон и не собирает статистику. Журнал лежит только на вашем компьютере и ограничен по размеру.',
+      add_title: 'Добавить пункт', kind_app: 'Программа', kind_app_sub: 'Из списка установленных', kind_open: 'Сайт, файл или папка', kind_open_sub: 'Откроется как двойным щелчком',
+      kind_keys: 'Сочетание клавиш', kind_keys_sub: 'Отправится в окно, где вы работали', kind_preset: 'Действие Windows', kind_preset_sub: 'Снимок, вставка, голосовой ввод и другие',
+      search: 'Поиск', loading: 'Собираю список программ…', nothing: 'Ничего не найдено',
+      name: 'Название', hint: 'Подсказка', hint_ph: 'Строка под названием в ярлыке', target: 'Адрес или путь', target_ph: 'https://… или C:\\…',
+      pick_file: 'Файл…', pick_folder: 'Папка…', keys: 'Сочетание', keys_press: 'Нажмите сочетание на клавиатуре или соберите его кнопками', key: 'Клавиша',
+      icon: 'Значок', icon_auto: 'Из программы', icon_own: 'Свой файл…', edit_title: 'Изменить пункт', need_name: 'Нужно название', need_target: 'Нужен адрес или путь', need_key: 'Выберите клавишу',
+    },
+    en: {
+      nav_items: 'Items', nav_look: 'Look', nav_general: 'General', nav_about: 'About',
+      add: 'Add', undo: 'Undo', open: 'Open', save: 'Save', cancel: 'Cancel',
+      intro: 'Tapka is a touch panel: the keys of a capsule at the screen edge start programs and send keyboard shortcuts to the window you were working in. The panel sends those key presses on your behalf. Put your own items together here with the Add button.',
+      items_foot: 'Drag an item by the dots on its left to change the order. The same list lives in the settings file and can be edited by hand.',
+      empty: 'No items yet. Press Add.', file_error: 'The settings file cannot be read, the items are unchanged: ',
+      edit: 'Edit', remove: 'Remove', removed: 'Item removed: ', broken: 'This item does not work: ',
+      theme: 'Theme', theme_sub: 'The capsule and this window', theme_system: 'Same as Windows', theme_dark: 'Dark', theme_light: 'Light',
+      accent: 'Accent colour', accent_sub: 'Marks, highlights and buttons', accent_own: 'Custom colour',
+      size: 'Capsule size', size_sub: 'Three sizes of keys', edge: 'Screen edge', edge_sub: 'The capsule can also be carried by its handle',
+      edge_left: 'Left', edge_top: 'Top', edge_right: 'Right',
+      lang: 'Language', lang_system: 'Same as Windows', autostart: 'Start with Windows', autostart_sub: 'Launch the panel when you sign in',
+      updates: 'Check for updates', updates_sub: 'One request to GitHub when the panel starts',
+      update_check: 'Check', update_go: 'Update', update_none: 'Updates have not been checked', update_off: 'Update checks are off',
+      update_checking: 'Checking…', update_latest: 'The latest version is installed', update_found: 'Version available: ', update_failed: 'Could not check',
+      update_loading: 'Downloading and installing the update…', update_current: 'Installed now: ',
+      file: 'Settings file', file_sub: 'All items and settings in one file', log: 'Log folder', log_sub: 'The log stays on this computer only',
+      quit: 'Quit', quit_sub: 'Close the panel until it is started again', quit_go: 'Quit',
+      about_sub: 'A touch panel for Windows 11', license: 'License', license_sub: 'The program comes as is, with no warranty of any kind',
+      privacy: 'What the panel does with keys and windows',
+      privacy_1: 'It sends key presses to the active window when you tap an item that carries a shortcut.',
+      privacy_2: 'Twice a second it reads the list of windows and their titles to mark the programs that are running. With update checks on, it contacts GitHub once per start.',
+      privacy_3: 'It does not record what you type, does not send window titles anywhere and collects no statistics. The log stays on your computer and is limited in size.',
+      add_title: 'Add an item', kind_app: 'Program', kind_app_sub: 'From the installed ones', kind_open: 'Site, file or folder', kind_open_sub: 'Opens as a double click would',
+      kind_keys: 'Keyboard shortcut', kind_keys_sub: 'Sent to the window you were working in', kind_preset: 'Windows action', kind_preset_sub: 'Snip, paste, voice typing and more',
+      search: 'Search', loading: 'Listing the programs…', nothing: 'Nothing found',
+      name: 'Name', hint: 'Hint', hint_ph: 'A line under the name in the label', target: 'Address or path', target_ph: 'https://… or C:\\…',
+      pick_file: 'File…', pick_folder: 'Folder…', keys: 'Shortcut', keys_press: 'Press the shortcut on a keyboard or build it with the buttons', key: 'Key',
+      icon: 'Icon', icon_auto: 'From the program', icon_own: 'Own file…', edit_title: 'Edit the item', need_name: 'A name is needed', need_target: 'An address or a path is needed', need_key: 'Choose a key',
+    },
+  };
+  let S = null;            // what Rust last said about the settings
+  let lang = 'en';
+  const t = key => T[lang][key] ?? key;
+  const ICON = {
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5l1-4.2L16.2 4.6a2 2 0 0 1 2.8 0l.4.4a2 2 0 0 1 0 2.8L8.7 18.5z"/><path d="M14.5 6.5l3 3"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l.8 11.2a2 2 0 0 0 2 1.8h5.4a2 2 0 0 0 2-1.8L17.500 7"/></svg>',
+    grip: '<svg viewBox="0 0 14 14" fill="currentColor"><circle cx="4" cy="2.5" r="1.3"/><circle cx="10" cy="2.5" r="1.3"/><circle cx="4" cy="7" r="1.3"/><circle cx="10" cy="7" r="1.3"/><circle cx="4" cy="11.5" r="1.3"/><circle cx="10" cy="11.5" r="1.3"/></svg>',
+    app: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9h17"/></svg>',
+  };
+  const svg = text => { const s = el('span'); s.style.display = 'contents'; s.innerHTML = text; return s; };
+
+  // ---------- theme, accent, language
+  const dark = matchMedia('(prefers-color-scheme: dark)');
+  function paint() {
+    const theme = S.theme === 'system' ? (dark.matches ? 'dark' : 'light') : S.theme;
+    document.documentElement.dataset.theme = theme;
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(S.accent.slice(i, i + 2), 16));
+    document.documentElement.style.setProperty('--accent', S.accent);
+    document.documentElement.style.setProperty('--on-accent', r * 0.299 + g * 0.587 + b * 0.114 > 150 ? '#000' : '#fff');
+  }
+  dark.addEventListener('change', () => S && paint());
+  function words() {
+    lang = S.russian ? 'ru' : 'en';
+    document.documentElement.lang = lang;
+    for (const e of document.querySelectorAll('[data-t]')) e.textContent = t(e.dataset.t);
+    document.title = 'Tapka — ' + t(document.querySelector('.nav.on').dataset.s === 'items' ? 'nav_items' : 'nav_' + document.querySelector('.nav.on').dataset.s);
+  }
+
+  // ---------- sections
+  function show(section) {
+    for (const n of document.querySelectorAll('.nav')) n.classList.toggle('on', n.dataset.s === section);
+    for (const s of document.querySelectorAll('section')) s.classList.toggle('on', s.id === 's-' + section);
+    if (S) words();
+  }
+  $('side').addEventListener('click', e => { const n = e.target.closest('.nav'); if (n) show(n.dataset.s); });
+
+  // ---------- an item's key, name and line
+  function keyOf(item) {
+    const k = el('span', { className: 'key' });
+    if (item.glyph) k.innerHTML = item.glyph;
+    else if (item.icon) k.append(el('img', { src: item.icon, alt: '' }));
+    else k.textContent = [...(item.raw.name || '?')][0].toUpperCase();
+    return k;
+  }
+  const pretty = keys => keys.split('+').map(k => k.trim()).map(k => k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1)).join(' + ');
+  const lineOf = raw => raw.hint || (raw.action === 'hotkey' ? pretty(raw.keys || '') : raw.target || '');
+
+  // ---------- the list of items
+  const raws = () => S.items.map(i => i.raw);
+  function save(items) { return invoke('save_items', { items }).catch(e => toast(String(e))); }
+  function drawItems() {
+    $('intro').hidden = !S.intro;
+    $('file-error').hidden = !S.error;
+    $('file-error').textContent = S.error ? t('file_error') + S.error : '';
+    // With the file unreadable there is nothing true to list and nowhere to add to
+    $('items').hidden = !!S.error;
+    $('add').disabled = !!S.error;
+    const rows = S.items.map((item, i) => {
+      const edit = el('button', { className: 'icon-btn', title: t('edit'), innerHTML: ICON.edit, onclick: () => editItem(i) });
+      const remove = el('button', { className: 'icon-btn', title: t('remove'), innerHTML: ICON.trash, onclick: () => removeItem(i) });
+      const sub = item.problem ? el('small', { className: 'problem ell', textContent: t('broken') + item.problem }) : el('small', { className: 'ell', textContent: lineOf(item.raw) });
+      const row = el('div', { className: 'row' },
+        el('span', { className: 'grip', innerHTML: ICON.grip }), keyOf(item),
+        el('div', { className: 'label' }, el('span', { className: 'ell', textContent: item.raw.name || '—' }), sub), edit, remove);
+      row.querySelector('.label span').style.display = 'block';
+      row.dataset.i = i;
+      return row;
+    });
+    $('items').replaceChildren(...(rows.length ? rows : [el('div', { className: 'row sub', textContent: t('empty') })]));
+  }
+  let undo = null, toastTimer = null;
+  function toast(text, back) {
+    $('toast-text').textContent = text;
+    undo = back || null;
+    $('toast-undo').hidden = !back;
+    $('toast').classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => $('toast').classList.remove('on'), back ? 6000 : 3000);
+  }
+  $('toast-undo').onclick = () => { $('toast').classList.remove('on'); if (undo) save(undo); };
+  function removeItem(i) {
+    const before = raws();
+    toast(t('removed') + (before[i].name || ''), before);
+    save(before.filter((_, n) => n !== i));
+  }
+
+  // Order: an item is carried by its dots with a finger, a pen or a mouse; the others make room
+  let carried = null;
+  $('items').addEventListener('pointerdown', e => {
+    const grip = e.target.closest('.grip');
+    if (!grip) return;
+    const row = grip.parentElement, rows = [...$('items').children];
+    carried = { row, id: e.pointerId, y: e.clientY, from: rows.indexOf(row), to: rows.indexOf(row), tops: rows.map(r => r.offsetTop), h: row.offsetHeight };
+    grip.setPointerCapture(e.pointerId);
+    row.classList.add('carried');
+  });
+  $('items').addEventListener('pointermove', e => {
+    if (!carried || e.pointerId !== carried.id) return;
+    const c = carried, rows = [...$('items').children];
+    const dy = Math.max(-c.tops[c.from], Math.min(c.tops[c.tops.length - 1] - c.tops[c.from], e.clientY - c.y));
+    c.row.style.transform = `translateY(${dy}px)`;
+    const at = c.tops[c.from] + dy;
+    c.to = c.tops.reduce((best, top, i) => Math.abs(top - at) < Math.abs(c.tops[best] - at) ? i : best, c.from);
+    rows.forEach((r, i) => {
+      if (r === c.row) return;
+      const shift = i > c.from && i <= c.to ? -c.h : i < c.from && i >= c.to ? c.h : 0;
+      r.style.transition = 'transform .12s';
+      r.style.transform = shift ? `translateY(${shift}px)` : '';
+    });
+  });
+  function dropRow(e) {
+    if (!carried || e.pointerId !== carried.id) return;
+    const { from, to } = carried;
+    carried = null;
+    if (from === to) return drawItems();
+    const items = raws();
+    items.splice(to, 0, items.splice(from, 1)[0]);
+    S.items.splice(to, 0, S.items.splice(from, 1)[0]);
+    drawItems();
+    save(items);
+  }
+  $('items').addEventListener('pointerup', dropRow);
+  $('items').addEventListener('pointercancel', dropRow);
+
+  // ---------- the dialog
+  let steps = [];
+  function dialog(title, body, foot = [], root = false) {
+    if (root) steps = [];
+    $('title').textContent = title;
+    $('body').replaceChildren(...body);
+    $('foot').replaceChildren(...foot);
+    $('back').hidden = steps.length === 0;
+    $('shade').classList.add('on');
+  }
+  const closeDialog = () => { $('shade').classList.remove('on'); steps = []; stopKeys(); };
+  $('close').onclick = closeDialog;
+  $('back').onclick = () => { stopKeys(); const back = steps.pop(); if (back) back(); };
+  $('shade').addEventListener('pointerdown', e => { if (e.target === $('shade')) closeDialog(); });
+  const field = (label, input) => el('div', { className: 'field' }, el('label', { textContent: label }), input);
+  const text = (value, placeholder = '') => el('input', { type: 'text', value: value || '', placeholder, spellcheck: false });
+  const pick = (key, title, sub, onclick) => el('button', { className: 'pick', onclick }, key, el('div', { className: 'label' }, el('b', { textContent: title }), el('small', { className: 'ell', textContent: sub || '' })));
+  const glyphKey = name => { const k = el('span', { className: 'key' }); k.innerHTML = S.glyphs[name] || ''; return k; };
+  function append(raw) { closeDialog(); return save([...raws(), raw]); }
+
+  function addItem() {
+    dialog(t('add_title'), [el('div', { className: 'list' },
+      pick(svgKey(ICON.app), t('kind_app'), t('kind_app_sub'), () => { steps.push(addItem); addApp(); }),
+      pick(glyphKey('browser'), t('kind_open'), t('kind_open_sub'), () => { steps.push(addItem); addOpen(); }),
+      pick(glyphKey('keyboard'), t('kind_keys'), t('kind_keys_sub'), () => { steps.push(addItem); addKeys(); }),
+      pick(glyphKey('snip'), t('kind_preset'), t('kind_preset_sub'), () => { steps.push(addItem); addPreset(); }),
+    )], [], steps.length === 0);
+  }
+  const svgKey = text => { const k = el('span', { className: 'key' }); k.innerHTML = text; return k; };
+  $('add').onclick = () => { steps = []; addItem(); };
+
+  // A program from the installed ones: the name and the picture come by themselves
+  let apps = null;
+  function addApp() {
+    const search = text('', t('search'));
+    const list = el('div', { className: 'list' });
+    const seen = new IntersectionObserver(found => {
+      for (const f of found) {
+        if (!f.isIntersecting) continue;
+        seen.unobserve(f.target);
+        invoke('icon_of', { target: f.target.dataset.target }).then(icon => { if (icon) f.target.querySelector('.key').replaceChildren(el('img', { src: icon, alt: '' })); });
+      }
+    }, { root: $('body') });
+    const draw = () => {
+      if (!apps) return list.replaceChildren(el('div', { className: 'sub', textContent: t('loading'), style: 'padding:10px' }));
+      const q = search.value.trim().toLowerCase();
+      const found = apps.filter(a => a.name.toLowerCase().includes(q)).slice(0, 300);
+      list.replaceChildren(...(found.length ? found.map(a => {
+        const k = el('span', { className: 'key', textContent: [...a.name][0].toUpperCase() });
+        const row = pick(k, a.name, '', () => append({ name: a.name, action: 'open', target: a.target }));
+        row.dataset.target = a.target;
+        seen.observe(row);
+        return row;
+      }) : [el('div', { className: 'sub', textContent: t('nothing'), style: 'padding:10px' })]));
+    };
+    search.oninput = draw;
+    dialog(t('kind_app'), [search, list]);
+    draw();
+    if (!apps) invoke('installed_apps').then(found => { apps = found; if (list.isConnected) draw(); });
+    search.focus();
+  }
+
+  function addOpen() {
+    const name = text(), target = text('', t('target_ph'));
+    const browse = directory => window.__TAURI__.dialog.open({ directory, multiple: false }).then(path => {
+      if (!path) return;
+      target.value = path;
+      if (!name.value) name.value = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop().replace(/\.(exe|lnk)$/i, '');
+    });
+    const add = el('button', { className: 'btn accent', textContent: t('add'), onclick: () => {
+      const address = target.value.trim();
+      if (!address) return toast(t('need_target'));
+      const label = name.value.trim() || address.replace(/^https?:\/\/(www\.)?/, '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+      append({ name: label, action: 'open', target: address });
+    } });
+    dialog(t('kind_open'), [
+      field(t('target'), el('div', { className: 'inline' }, target, el('button', { className: 'btn', textContent: t('pick_file'), onclick: () => browse(false) }), el('button', { className: 'btn', textContent: t('pick_folder'), onclick: () => browse(true) }))),
+      field(t('name'), name),
+    ], [add]);
+    target.focus();
+  }
+
+  // A shortcut: pressed on a keyboard, or put together with the buttons when there is none.
+  // Windows keeps some Win shortcuts to itself, so the Win key can always be added by hand.
+  const KEYS = [...'abcdefghijklmnopqrstuvwxyz0123456789', ...Array.from({ length: 12 }, (_, i) => 'f' + (i + 1)),
+    'space', 'enter', 'tab', 'esc', 'backspace', 'delete', 'insert', 'home', 'end', 'pageup', 'pagedown', 'left', 'up', 'right', 'down', 'printscreen'];
+  const CODES = { Space: 'space', Enter: 'enter', Tab: 'tab', Escape: 'esc', Backspace: 'backspace', Delete: 'delete', Insert: 'insert', Home: 'home', End: 'end',
+    PageUp: 'pageup', PageDown: 'pagedown', ArrowLeft: 'left', ArrowUp: 'up', ArrowRight: 'right', ArrowDown: 'down', PrintScreen: 'printscreen' };
+  const keyName = e => /^Key[A-Z]$/.test(e.code) ? e.code[3].toLowerCase() : /^Digit\d$/.test(e.code) ? e.code[5] : /^F\d{1,2}$/.test(e.code) ? e.code.toLowerCase() : CODES[e.code] || null;
+  let onKeys = null;
+  const stopKeys = () => { if (onKeys) window.removeEventListener('keydown', onKeys, true); onKeys = null; };
+  function keysEditor(start) {
+    const parts = (start || '').toLowerCase().split('+').map(p => p.trim());
+    const state = { ctrl: parts.includes('ctrl'), shift: parts.includes('shift'), alt: parts.includes('alt'), win: parts.includes('win'), key: parts.find(p => KEYS.includes(p)) || '' };
+    const chips = ['ctrl', 'shift', 'alt', 'win'].map(m => el('button', { className: 'chip', textContent: pretty(m), onclick: () => { state[m] = !state[m]; draw(); } }));
+    const key = el('select', {}, el('option', { value: '', textContent: '—' }), ...KEYS.map(k => el('option', { value: k, textContent: pretty(k) })));
+    key.onchange = () => { state.key = key.value; };
+    const draw = () => { chips.forEach((c, i) => c.classList.toggle('on', state[['ctrl', 'shift', 'alt', 'win'][i]])); key.value = state.key; };
+    stopKeys();
+    onKeys = e => {
+      if (e.target.matches?.('input[type=text]')) return;
+      const k = keyName(e);
+      if (!k) return;
+      e.preventDefault();
+      Object.assign(state, { ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, win: e.metaKey, key: k });
+      draw();
+    };
+    window.addEventListener('keydown', onKeys, true);
+    draw();
+    return {
+      node: field(t('keys'), el('div', {}, el('div', { className: 'chips' }, ...chips, key), el('small', { className: 'sub', textContent: t('keys_press'), style: 'margin-top:6px' }))),
+      value: () => state.key ? [...['ctrl', 'shift', 'alt', 'win'].filter(m => state[m]), state.key].join('+') : '',
+    };
+  }
+  function addKeys() {
+    const name = text(), keys = keysEditor('');
+    const add = el('button', { className: 'btn accent', textContent: t('add'), onclick: () => {
+      if (!keys.value()) return toast(t('need_key'));
+      append({ name: name.value.trim() || pretty(keys.value()), icon: 'keyboard', action: 'hotkey', keys: keys.value() });
+    } });
+    dialog(t('kind_keys'), [keys.node, field(t('name'), name)], [add]);
+  }
+
+  function addPreset() {
+    dialog(t('kind_preset'), [el('div', { className: 'list' }, ...S.presets.map(p => pick(glyphKey(p.item.icon), p.item.name, p.item.hint, () => append(p.item))))]);
+  }
+
+  // Name, hint, what it does and its picture; fields this window does not show stay in the item
+  function editItem(i) {
+    if (typeof S.items[i].raw !== 'object' || !S.items[i].raw) return;
+    const raw = { ...S.items[i].raw };
+    const name = text(raw.name), hint = text(raw.hint, t('hint_ph'));
+    const body = [field(t('name'), name), field(t('hint'), hint)];
+    let keys = null, target = null;
+    if (raw.action === 'hotkey') { keys = keysEditor(raw.keys); body.push(keys.node); }
+    else if (raw.action === 'open') { target = text(raw.target, t('target_ph')); body.push(field(t('target'), target)); }
+    // The picture: the program's own, one of the built-in ones, or a file of the user's
+    let icon = raw.icon || '';
+    const glyphs = el('div', { className: 'glyphs' });
+    const drawGlyphs = () => {
+      const auto = el('button', { className: 'chip' + (icon ? '' : ' on'), textContent: raw.action === 'open' ? t('icon_auto') : '—', onclick: () => { icon = ''; drawGlyphs(); } });
+      const own = el('button', { className: 'chip' + (icon && !S.glyphs[icon] ? ' on' : ''), textContent: icon && !S.glyphs[icon] ? icon : t('icon_own'), onclick: () =>
+        window.__TAURI__.dialog.open({ multiple: false, filters: [{ name: 'PNG, SVG', extensions: ['png', 'svg'] }] })
+          .then(path => path && invoke('import_icon', { path })).then(file => { if (file) { icon = file; drawGlyphs(); } }).catch(e => toast(String(e))) });
+      glyphs.replaceChildren(el('div', { className: 'chips', style: 'width:100%;margin-bottom:4px' }, auto, own),
+        ...Object.keys(S.glyphs).map(g => el('button', { className: g === icon ? 'on' : '', title: g, onclick: () => { icon = g; drawGlyphs(); } }, glyphKey(g))));
+    };
+    drawGlyphs();
+    body.push(field(t('icon'), glyphs));
+    const done = el('button', { className: 'btn accent', textContent: t('save'), onclick: () => {
+      if (!name.value.trim()) return toast(t('need_name'));
+      if (keys && !keys.value()) return toast(t('need_key'));
+      if (target && !target.value.trim()) return toast(t('need_target'));
+      // The fields are set in place, so their order in the file and the fields not shown here stay
+      const set = (k, v) => { if (v) raw[k] = v; else delete raw[k]; };
+      raw.name = name.value.trim();
+      set('icon', icon);
+      set('hint', hint.value.trim());
+      if (keys) raw.keys = keys.value();
+      if (target) raw.target = target.value.trim();
+      const items = raws();
+      items[i] = raw;
+      closeDialog();
+      save(items);
+    } });
+    dialog(t('edit_title'), body, [el('button', { className: 'btn', textContent: t('cancel'), onclick: closeDialog }), done], true);
+  }
+
+  // ---------- look and general: every change goes to the file at once and shows at once
+  const ACCENTS = ['#8ab4ff', '#6fd3c1', '#8fd67a', '#ffd166', '#ff9e64', '#ff8fa3', '#c79bff', '#b9c2d0'];
+  let accentTimer = null;
+  function setPref(key, value) { S[key] = value; paint(); drawPrefs(); return invoke('set_pref', { key, value }).catch(e => toast(String(e))); }
+  function drawPrefs() {
+    $('theme').value = S.theme;
+    $('lang').value = S.lang;
+    for (const b of $('scale').children) b.classList.toggle('on', Number(b.dataset.v) === S.scale);
+    for (const b of $('edge').children) b.classList.toggle('on', b.dataset.v === S.edge);
+    $('autostart').classList.toggle('on', S.autostart);
+    $('updates').classList.toggle('on', S.updates);
+    const own = el('input', { type: 'color', value: S.accent, title: t('accent_own') });
+    own.oninput = () => {
+      S.accent = own.value; paint();
+      for (const s of $('swatches').querySelectorAll('.swatch')) s.classList.toggle('on', s.dataset.v === S.accent);
+      clearTimeout(accentTimer);
+      accentTimer = setTimeout(() => invoke('set_pref', { key: 'accent', value: S.accent }), 120);
+    };
+    if (!$('swatches').querySelector('input:focus')) {
+      $('swatches').replaceChildren(...ACCENTS.map(c => {
+        const s = el('button', { className: 'swatch' + (c === S.accent ? ' on' : ''), title: c, onclick: () => setPref('accent', c) });
+        s.dataset.v = c; s.style.background = c;
+        return s;
+      }), own);
+    }
+    $('version').textContent = S.version;
+    drawUpdate();
+  }
+  $('theme').onchange = () => setPref('theme', $('theme').value);
+  $('lang').onchange = () => invoke('set_pref', { key: 'lang', value: $('lang').value }).then(refresh);
+  $('scale').onclick = e => { const b = e.target.closest('button'); if (b) setPref('scale', Number(b.dataset.v)); };
+  $('edge').onclick = e => { const b = e.target.closest('button'); if (b) setPref('edge', b.dataset.v); };
+  $('autostart').onclick = () => setPref('autostart', !S.autostart);
+  $('updates').onclick = () => setPref('updates', !S.updates).then(refresh);
+  $('open-file').onclick = () => invoke('open_settings_file');
+  $('open-log').onclick = () => invoke('open_log_folder');
+  $('github').onclick = () => invoke('open_github');
+  $('quit').onclick = () => invoke('quit');
+
+  // ---------- updates: quiet, no pop-ups; the panel never claims to be the latest before a check passed
+  function drawUpdate() {
+    $('update-row').hidden = !S.update;
+    const u = S.update || { state: 'none' };
+    const state = !S.updates && u.state !== 'found' ? 'off' : u.state;
+    $('update-state').textContent = state === 'found' ? t('update_found') + u.version : t('update_' + state);
+    $('update-sub').textContent = state === 'failed' && u.why ? u.why : t('update_current') + S.version;
+    $('update-go').hidden = state !== 'found';
+    $('update-check').hidden = state === 'found' || state === 'loading' || state === 'checking' || !S.updates;
+  }
+  $('update-check').onclick = () => { S.update = { state: 'checking' }; drawUpdate(); invoke('check_update').then(refresh); };
+  $('update-go').onclick = () => { S.update = { state: 'loading' }; drawUpdate(); invoke('install_update').catch(e => { S.update = { state: 'failed', why: String(e) }; drawUpdate(); }); };
+
+  // ---------- everything comes from Rust and is drawn anew whenever the file changes
+  function refresh() {
+    return invoke('get_settings').then(s => {
+      S = s;
+      paint(); words(); drawPrefs();
+      if (!carried) drawItems();
+    });
+  }
+  window.__TAURI__.event.listen('reload', refresh);
+  window.__TAURI__.event.listen('section', e => show(e.payload));
+  refresh();
+</script>
+</body>
+</html>

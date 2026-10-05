@@ -1,0 +1,69 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Tapka",
+  "version": "1.0.0",
+  "identifier": "sargares22.tapka",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "capsule",
+        "url": "index.html",
+        "width": 70,
+        "height": 158,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "visible": false,
+        "focus": false,
+        "focusable": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "publisher": "Sargares22",
+    "shortDescription": "Touch panel for Windows 11",
+    "license": "WTFPL",
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English",
+          "Russian"
+        ],
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFDRjIyREYxNDZGMDAzQTgKUldTb0EvQkc4UzN5SE9ycS83T0FlSTZFSEFCZnhOSWRleDBDOUVIa2JybWNqWXNud2J4WXBSb1MK",
+      "endpoints": [
+        "https://github.com/Sargares22/tapka/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

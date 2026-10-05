@@ -1,0 +1,39 @@
+[package]
+name = "tapka"
+version = "1.0.0"
+edition = "2021"
+license = "WTFPL"
+authors = ["Sargares22"]
+repository = "https://github.com/Sargares22/tapka"
+description = "Touch panel for Windows 11: a capsule of big keys at the screen edge"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "zip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+base64 = "0.22"
+png = "0.17"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_Packaging_Appx",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_UI_WindowsAndMessaging",
+] }

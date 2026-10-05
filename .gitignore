@@ -1,0 +1,8 @@
+target/
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+gen/
+dist/
+assets/tapka-intro.mp4

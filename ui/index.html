@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tapka</title>
+<style>
+  /* The panel's own look: a graphite strip docked flush to a screen edge, keys instead of
+     circles, one blue accent. Docked, its edge side is flat; carried by the handle it comes off
+     as a rounded island lit by the accent, so being attached and being moved look different.
+     Segoe UI; a dark and a light range; the accent comes from the settings. */
+  :root{
+    --pill:#0e0f12;--key:#1c1d22;--key-hot:#2a2c33;--label:#17181c;
+    --ink:#fff;--ink-2:#e6e8ee;--ink-dim:#8b8f9a;--accent:#8ab4ff;
+    --rim:inset 0 0 0 1px rgba(255,255,255,.10);--bar:rgba(255,255,255,.28);--bar-hot:rgba(255,255,255,.55);
+  }
+  :root[data-theme=light]{
+    --pill:#eef0f4;--key:#fff;--key-hot:#dfe3ea;--label:#fff;
+    --ink:#15171c;--ink-2:#2a2d34;--ink-dim:#676c78;
+    --rim:inset 0 0 0 1px rgba(0,0,0,.12);--bar:rgba(0,0,0,.28);--bar-hot:rgba(0,0,0,.55);
+  }
+  *{box-sizing:border-box}
+  html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent;user-select:none}
+  body{font-family:"Segoe UI",system-ui,sans-serif;color:var(--ink-2)}
+  /* The window keeps 12 px before and after the pill and 18 px on its inner side for the shadow */
+  #pill{
+    position:absolute;right:0;top:12px;bottom:12px;width:60px;
+    background:var(--pill);border-radius:22px 0 0 22px;
+    box-shadow:var(--rim),0 2px 10px rgba(0,0,0,.35);
+    display:flex;flex-direction:column;
+    transition:transform .15s,box-shadow .15s,border-radius .15s;
+  }
+  /* The handle. What is drawn here is only the bar: a native window lies over this strip and
+     the room before it, and Windows itself carries the capsule by it (see grab.rs). */
+  #grip{position:relative;flex:0 0 44px;touch-action:none}
+  #grip::before{content:"";position:absolute;left:0;right:0;top:-12px;height:12px}
+  #grip::after{
+    content:"";position:absolute;left:50%;top:20px;width:26px;height:5px;border-radius:3px;
+    transform:translateX(-50%);background:var(--bar);transition:width .15s,background .15s;
+  }
+  #grip.hot::after{width:30px;background:var(--bar-hot)}
+  /* The keys: the list of items, which scrolls, and after it the key that opens the editor */
+  #keys{flex:1 1 auto;min-width:0;min-height:0;padding-bottom:3px;display:flex;flex-direction:column;touch-action:none}
+  #list{
+    flex:1 1 auto;min-width:0;min-height:0;
+    display:flex;flex-direction:column;align-items:stretch;
+    overflow-y:auto;scrollbar-width:none;touch-action:none;overscroll-behavior:contain;
+    --before:0px;--after:0px;
+    mask-image:linear-gradient(to bottom,transparent,#000 var(--before),#000 calc(100% - var(--after)),transparent);
+  }
+  /* More items past an end of the list: that end fades out */
+  #list.more-before{--before:26px}
+  #list.more-after{--after:26px}
+  /* An item is a cell as wide as the pill, so there is no dead space between keys; the key is
+     what is drawn. --cell is the step from key to key, wider without a keyboard. */
+  .item{
+    flex:0 0 var(--cell,54px);width:100%;border:none;padding:0;background:none;color:inherit;font:inherit;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .key{
+    width:46px;height:46px;border-radius:14px;background:var(--key);
+    display:flex;align-items:center;justify-content:center;
+    color:var(--ink-2);font-size:16px;font-weight:700;
+    transition:background .15s,transform .12s ease-out;
+  }
+  /* The program this item opens is running: a short accent bar on the key's edge side */
+  .item{position:relative}
+  .item.on::after{content:"";position:absolute;right:1.5px;top:50%;width:3px;height:14px;border-radius:2px;transform:translateY(-50%);background:var(--accent)}
+  /* The window this item watches for is showing (dictation is recording): the key itself is lit */
+  .item.live .key{background:color-mix(in srgb,var(--accent) 24%,var(--key));box-shadow:inset 0 0 0 1.5px var(--accent)}
+  .item.hot .key{background:var(--key-hot)}
+  .item.down .key{transform:scale(.92);background:var(--key-hot)}
+  .key img{display:block;width:24px;height:24px;object-fit:contain;pointer-events:none}
+  .key svg{display:block;width:24px;height:24px;pointer-events:none}
+  /* The plus that opens the editor is not a key: a small quiet mark in the foot of the pill, like
+     the bar of the handle at its head. The whole foot takes the press. */
+  .item.add{flex:0 0 38px}
+  .item.add .key{width:46px;height:30px;border-radius:11px;background:none;color:var(--ink-dim)}
+  .item.add .key svg{width:20px;height:20px}
+  .item.add.hot .key,.item.add.down .key{background:var(--key);color:var(--ink-2)}
+  /* Carried by the handle: lifted, lit by the accent, keys dimmed */
+  body.dragging #pill{border-radius:22px;transform:translateX(-8px) scale(1.03);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 70%,transparent),0 6px 12px rgba(0,0,0,.5)}
+  body.dragging #grip::after{width:34px;background:var(--accent)}
+  body.dragging .key{opacity:.6}
+  /* The name label, on the inner side of the pill, level with its key */
+  #card{
+    position:absolute;right:70px;transform:translateY(-50%);max-width:260px;
+    background:var(--label);border-radius:12px;padding:9px 12px;
+    box-shadow:var(--rim),0 2px 10px rgba(0,0,0,.35);
+    overflow-wrap:anywhere;color:var(--ink);pointer-events:none;
+  }
+  #card[hidden]{display:none}
+  .c-title{font-size:13px;font-weight:600}
+  .c-sub{font-size:11px;color:var(--ink-dim);margin-top:2px}
+  .c-sub:empty{display:none}
+  /* At the left edge the strip and the label change sides; nothing else is mirrored */
+  body[data-edge="left"] #pill{right:auto;left:0;border-radius:0 22px 22px 0}
+  body[data-edge="left"] #card{right:auto;left:70px}
+  body[data-edge="left"] .item.on::after{right:auto;left:1.5px}
+  body[data-edge="left"].dragging #pill{border-radius:22px;transform:translateX(8px) scale(1.03)}
+  /* At the top edge the strip lies flat: the handle at its left end, keys in a row, the list
+     scrolling sideways, the label under its key. Icons are not turned. */
+  body[data-edge="top"] #pill{top:0;bottom:auto;left:12px;right:12px;width:auto;height:60px;flex-direction:row;border-radius:0 0 22px 22px}
+  body[data-edge="top"] #grip::before{left:-12px;right:auto;top:0;width:12px;height:100%}
+  body[data-edge="top"] #grip::after{left:20px;top:50%;width:5px;height:26px;transform:translateY(-50%);transition:height .15s,background .15s}
+  body[data-edge="top"] #grip.hot::after{width:5px;height:30px}
+  body[data-edge="top"].dragging #grip::after{width:5px;height:34px}
+  body[data-edge="top"] #keys{flex-direction:row;padding:0 3px 0 0}
+  body[data-edge="top"] #list{flex-direction:row;overflow-x:auto;overflow-y:hidden;mask-image:linear-gradient(to right,transparent,#000 var(--before),#000 calc(100% - var(--after)),transparent)}
+  body[data-edge="top"] .item{width:auto;height:100%}
+  body[data-edge="top"] .item.add .key{width:30px;height:46px}
+  body[data-edge="top"] .item.on::after{right:auto;left:50%;top:1.5px;width:14px;height:3px;transform:translateX(-50%)}
+  body[data-edge="top"] #card{right:auto;top:70px;transform:translateX(-50%)}
+  body[data-edge="top"].dragging #pill{border-radius:22px;transform:translateY(8px) scale(1.03)}
+  @media (prefers-reduced-motion: reduce){#pill,.key,#grip::after{transition:none}}
+</style>
+</head>
+<body>
+  <div id="card" hidden><div class="c-title"></div><div class="c-sub"></div></div>
+  <div id="pill"><div id="grip"></div><div id="keys"><div id="list"></div></div></div>
+<script>
+  const list = document.getElementById('list');
+  const keys = document.getElementById('keys');
+  const grip = document.getElementById('grip');
+  const card = document.getElementById('card');
+  const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+  const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8;
+  let shown = [];
+  let tablet = false;
+  // Docked to the top edge the capsule lies flat: scrolling and the label go the other way
+  const flat = () => document.body.dataset.edge === 'top';
+
+  // The settings choose the theme, or leave it to Windows
+  const dark = matchMedia('(prefers-color-scheme: dark)');
+  let theme = 'system';
+  const paint = () => { document.documentElement.dataset.theme = theme === 'system' ? (dark.matches ? 'dark' : 'light') : theme; };
+  dark.addEventListener('change', paint);
+  const PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5.5v13M5.5 12h13"/></svg>';
+
+  // One key per item: its picture if it has one, otherwise the first letter of the name. After
+  // the items comes one more key, which opens the editor.
+  function render(view) {
+    hideCard();
+    tablet = view.tablet;
+    theme = view.theme;
+    paint();
+    document.documentElement.style.setProperty('--accent', view.accent);
+    document.body.dataset.edge = view.edge;
+    list.style.setProperty('--cell', view.cell + 'px');
+    shown = [...view.items, { name: view.add[0], hint: view.add[1], glyph: PLUS, add: true }];
+    const made = shown.map((it, i) => {
+      const b = document.createElement('button');
+      b.className = 'item' + (it.on ? ' on' : '') + (it.live ? ' live' : '') + (it.add ? ' add' : '');
+      b.dataset.i = i;
+      const key = document.createElement('span');
+      key.className = 'key';
+      if (it.glyph) {
+        // A built-in icon is the panel's own SVG; inline, it is drawn in the ink of the theme
+        key.innerHTML = it.glyph;
+      } else if (it.icon) {
+        const img = document.createElement('img');
+        img.src = it.icon;
+        img.alt = it.name;
+        key.append(img);
+      } else {
+        key.textContent = [...it.name][0].toUpperCase();
+      }
+      b.append(key);
+      return b;
+    });
+    const add = made.pop();
+    list.replaceChildren(...made);
+    keys.replaceChildren(list, add);
+    fades();
+  }
+  // The list says where it goes on: the end with more items past it fades out
+  function fades() {
+    const at = flat() ? list.scrollLeft : list.scrollTop;
+    const end = flat() ? list.scrollWidth - list.clientWidth : list.scrollHeight - list.clientHeight;
+    list.classList.toggle('more-before', at > 2);
+    list.classList.toggle('more-after', at < end - 2);
+  }
+  list.addEventListener('scroll', fades, { passive: true });
+  new ResizeObserver(fades).observe(list);
+
+  // Feedback: the key dips while it is held, and a tap that ran its action flashes the rim in
+  // the accent once. Neither moves focus.
+  const calm = matchMedia('(prefers-reduced-motion: reduce)');
+  function flash(b) {
+    if (calm.matches) return;
+    b.querySelector('.key').animate([
+      { boxShadow: '0 0 0 1.5px var(--accent)' },
+      { boxShadow: '0 0 0 1.5px transparent' },
+    ], { duration: 360, easing: 'ease-out' });
+  }
+
+  // The name label: opens after a long press or a hover, closes on release, leave or a press elsewhere
+  let cardTimer = null;
+  let cardFor = null;
+  function showCard(b) {
+    const it = shown[Number(b.dataset.i)];
+    card.querySelector('.c-title').textContent = it.name;
+    card.querySelector('.c-sub').textContent = it.hint || '';
+    cardFor = b;
+    card.hidden = false;
+    placeCard();
+    // Only the label's own rectangle, with room for its shadow, is let through the window
+    const r = card.getBoundingClientRect();
+    invoke('card', { open: true, rect: [r.left - 14, r.top - 14, r.width + 28, r.height + 28] });
+  }
+  // The label is centred on its key but stays inside the window
+  function placeCard() {
+    if (!cardFor) return;
+    const r = cardFor.getBoundingClientRect();
+    const across = flat();
+    const at = across ? r.left + r.width / 2 : r.top + r.height / 2;
+    const half = (across ? card.offsetWidth : card.offsetHeight) / 2;
+    const lo = half + 8, hi = Math.max(lo, (across ? window.innerWidth : window.innerHeight) - half - 8);
+    const px = Math.min(Math.max(at, lo), hi) + 'px';
+    card.style.left = across ? px : '';
+    card.style.top = across ? '' : px;
+  }
+  function hideCard() {
+    clearTimeout(cardTimer);
+    cardTimer = null;
+    if (card.hidden) return;
+    cardFor = null;
+    card.hidden = true;
+    invoke('card', { open: false });
+  }
+
+  // Presses on the keys. A press and release on the same item less than SLOP apart is a tap; Rust
+  // runs the action. A finger or a pen that moves before LONG_PRESS_MS scrolls the list (the page
+  // does it itself: touch-action is off so the gesture is never taken away mid-press). Held for
+  // LONG_PRESS_MS, the press shows the name label instead of running the action. The mouse wheel
+  // scrolls. The capsule is moved by its handle only.
+  let press = null;
+  const lift = () => { for (const b of keys.querySelectorAll('.down')) b.classList.remove('down'); };
+  const keyAt = i => keys.querySelector(`.item[data-i="${i}"]`);
+  keys.addEventListener('pointerdown', e => {
+    hideCard();
+    const b = e.target.closest('.item');
+    press = {
+      id: e.pointerId, index: b ? Number(b.dataset.i) : -1, x: e.clientX, y: e.clientY,
+      scroll: flat() ? list.scrollLeft : list.scrollTop, mouse: e.pointerType === 'mouse', long: false, scrolling: false,
+    };
+    try { keys.setPointerCapture(e.pointerId); } catch (_) {}
+    if (!b) return;
+    b.classList.add('down');
+    cardTimer = setTimeout(() => {
+      if (!press) return;
+      press.long = true;
+      showCard(b);
+      // Should the release never reach the page, the label still does not stay for good
+      cardTimer = setTimeout(drop, LABEL_STAYS_MS);
+    }, LONG_PRESS_MS);
+  });
+  window.addEventListener('pointermove', e => {
+    if (!press || press.id !== e.pointerId || press.mouse) return;
+    const p = press;
+    if (!p.scrolling && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP) return;
+    // A finger that moves on after the label came up is scrolling: the label goes
+    p.scrolling = true;
+    hideCard();
+    lift();
+    if (flat()) list.scrollLeft = p.scroll - (e.clientX - p.x);
+    else list.scrollTop = p.scroll - (e.clientY - p.y);
+  });
+  // A flat list has nowhere to go for a vertical wheel, so the wheel moves it sideways
+  list.addEventListener('wheel', e => { if (flat()) list.scrollLeft += e.deltaY; }, { passive: true });
+  function release(e) {
+    if (!press || press.id !== e.pointerId) return;
+    const p = press;
+    press = null;
+    lift();
+    hideCard();
+    if (p.scrolling || p.long || p.index < 0) return;
+    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) >= SLOP || !keyAt(p.index)) return;
+    flash(keyAt(p.index));
+    invoke('tap', { index: p.index, pointer: e.pointerType || 'unknown' });
+  }
+  window.addEventListener('pointerup', release);
+  // The press was taken away without a release: nothing stays pressed and no label stays open
+  const drop = () => { press = null; lift(); hideCard(); };
+  window.addEventListener('pointercancel', drop);
+  keys.addEventListener('lostpointercapture', drop);
+
+  // Hover. The page gets no mouse movement in a window that never takes focus, so Rust reports
+  // where the cursor is over the capsule (CSS px) or null when it has left. The item under the
+  // cursor lights up and, after HOVER_MS, shows its label. After a finger or a pen press hover
+  // stays off until the cursor leaves. Without a keyboard there is no hover label at all.
+  let hot = null, afterTouch = false;
+  function hover(at) {
+    if (!at) afterTouch = false;
+    if (!at && press && press.long) drop();
+    const el = at && !afterTouch && !press ? document.elementFromPoint(at[0], at[1]) : null;
+    const b = el ? el.closest('.item') : null;
+    grip.classList.toggle('hot', !!el && !!el.closest('#grip'));
+    if (b === hot) return;
+    if (hot) hot.classList.remove('hot');
+    hot = b;
+    if (press) return;
+    hideCard();
+    if (!b) return;
+    b.classList.add('hot');
+    if (!tablet) cardTimer = setTimeout(() => showCard(b), HOVER_MS);
+  }
+  keys.addEventListener('pointerdown', e => {
+    afterTouch = e.pointerType !== 'mouse';
+    if (hot) hot.classList.remove('hot');
+    hot = null;
+  }, true);
+  window.__TAURI__.event.listen('hover', e => hover(e.payload));
+
+  // Rust watches the programs the items open and the windows they wait for, and says when one
+  // appears or goes: [running, live] for each item
+  window.__TAURI__.event.listen('marks', e => {
+    e.payload.forEach(([on, live], i) => {
+      const b = list.children[i];
+      if (!b) return;
+      b.classList.toggle('on', on);
+      b.classList.toggle('live', live);
+    });
+  });
+
+  // Windows carries the capsule by its handle; Rust says when a carry starts. The drop ends with
+  // a reload: the capsule is back on an edge.
+  window.__TAURI__.event.listen('carry', () => {
+    press = null;
+    lift();
+    hideCard();
+    document.body.classList.add('dragging');
+  });
+  const refresh = () => invoke('get_view').then(render);
+  window.__TAURI__.event.listen('reload', () => {
+    document.body.classList.remove('dragging');
+    refresh();
+  });
+  refresh();
+</script></body>
+</html>
