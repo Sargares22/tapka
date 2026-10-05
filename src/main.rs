@@ -41,6 +41,16 @@ struct AppState {
     intro: AtomicBool,
     /// What is known about a newer release.
     update: Mutex<Update>,
+    /// The capsule is meant to be on screen: the keyboard rule, the tray and a second launch say
+    /// so. A snapshot takes the capsule off the screen without changing this.
+    wanted: AtomicBool,
+    /// The capsule is off the screen for a snapshot and comes back by itself.
+    snapping: AtomicBool,
+    /// One change of the capsule's visibility at a time: the tray, the keyboard rule and a
+    /// snapshot's return come from different threads, and the capsule and its handle must end up
+    /// the same way. Showing and hiding only post a request to the windows and wait for nothing,
+    /// so this lock is safe to hold across them.
+    showing: Mutex<()>,
 }
 
 /// The panel never says it is the latest version before a check has passed.
@@ -232,15 +242,21 @@ fn get_view(app: AppHandle) -> View {
 /// Returns once the capsule is off the screen, so the keys that follow do not catch it.
 fn hide_capsule_until_snapshot(app: &AppHandle) -> Result<(), String> {
     let w = app.get_webview_window("capsule").ok_or("no capsule window")?;
-    if !w.is_visible().unwrap_or(true) {
-        return Ok(()); // already hidden from the tray: nothing to hide and nothing to bring back
-    }
+    let state = app.state::<AppState>();
     let hwnd = w.hwnd().map_err(|e| e.to_string())?.0 as isize;
-    win::set_visible(hwnd, false);
-    grab::set_visible(false);
     // A second snapshot before the first wait ran out: only the latest wait shows the capsule
     static HIDES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let mine = HIDES.fetch_add(1, Ordering::Relaxed) + 1;
+    let mine = {
+        let _turn = state.showing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.wanted.load(Ordering::Relaxed) {
+            return Ok(()); // already hidden, from the tray or by the keyboard: nothing to bring back
+        }
+        state.snapping.store(true, Ordering::Relaxed);
+        win::set_visible(hwnd, false);
+        grab::set_visible(false);
+        HIDES.fetch_add(1, Ordering::Relaxed) + 1
+    };
+    let app = app.clone();
     std::thread::spawn(move || {
         // The selection belongs to the Snipping Tool; while it is up, that program is in front
         let hidden = std::time::Instant::now();
@@ -254,9 +270,15 @@ fn hide_capsule_until_snapshot(app: &AppHandle) -> Result<(), String> {
                 (other, false) => other,
             };
         }
+        let state = app.state::<AppState>();
+        let _turn = state.showing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if HIDES.load(Ordering::Relaxed) == mine {
-            win::set_visible(hwnd, true);
-            grab::set_visible(true);
+            state.snapping.store(false, Ordering::Relaxed);
+            // Hidden from the tray or by the keyboard in the meantime: it stays hidden
+            if state.wanted.load(Ordering::Relaxed) {
+                win::set_visible(hwnd, true);
+                grab::set_visible(true);
+            }
         }
     });
     std::thread::sleep(std::time::Duration::from_millis(150));
@@ -520,6 +542,7 @@ fn get_settings(app: AppHandle) -> Value {
         "russian": russian,
         "autostart": autostart::is_enabled(),
         "updates": s.updates,
+        "tablet_only": s.tablet_only,
         "version": app.package_info().version.to_string(),
         "error": *state.error.lock().unwrap(),
         "intro": state.intro.load(Ordering::Relaxed),
@@ -550,6 +573,7 @@ fn set_pref(app: AppHandle, key: String, value: Value) -> Result<(), String> {
         "accent" => json!(value.as_str().and_then(config::accent).ok_or("accent: not a colour")?),
         "scale" => json!(config::snap_scale(value.as_f64().ok_or("scale: not a number")?)),
         "updates" => json!(value.as_bool().ok_or("updates: not a switch")?),
+        "tablet_only" => json!(value.as_bool().ok_or("tablet_only: not a switch")?),
         _ => return Err(format!("unknown setting {key}")),
     };
     write_field(&app, &key, value)
@@ -714,8 +738,15 @@ fn update_tray_tooltip(app: &AppHandle) {
     let _ = tray.set_tooltip(Some(text));
 }
 
-/// Shows or hides the capsule without giving it focus.
+/// Shows or hides the capsule without giving it focus. During a snapshot it is only remembered
+/// that the capsule should be shown: the snapshot's own return shows it.
 fn set_capsule_visible(app: &AppHandle, visible: bool) {
+    let state = app.state::<AppState>();
+    let _turn = state.showing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.wanted.store(visible, Ordering::Relaxed);
+    if visible && state.snapping.load(Ordering::Relaxed) {
+        return;
+    }
     let Some(w) = app.get_webview_window("capsule") else { return };
     if let Ok(hwnd) = w.hwnd() {
         win::set_visible(hwnd.0 as isize, visible);
@@ -742,8 +773,8 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     tray.on_menu_event(move |app, event| match event.id.as_ref() {
         "prefs" => open_settings_window(app),
         "toggle" => {
-            let visible = app.get_webview_window("capsule").and_then(|w| w.is_visible().ok()).unwrap_or(true);
-            set_capsule_visible(app, !visible);
+            let wanted = app.state::<AppState>().wanted.load(Ordering::Relaxed);
+            set_capsule_visible(app, !wanted);
         }
         "quit" => app.exit(0),
         _ => {}
@@ -842,8 +873,8 @@ fn screen(app: &AppHandle) -> Option<((i32, i32, u32, u32), f64)> {
 }
 
 /// Notices a saved settings file, a detached or attached keyboard and a turned or resized screen
-/// within half a second.
-fn watch_settings(app: AppHandle) {
+/// within half a second. `by_keyboard` is where the keyboard rule had the capsule at start.
+fn watch_settings(app: AppHandle, mut by_keyboard: bool) {
     let Some(path) = settings_path(&app) else { return };
     let modified = move || std::fs::metadata(&path).and_then(|m| m.modified()).ok();
     std::thread::spawn(move || {
@@ -900,6 +931,15 @@ fn watch_settings(app: AppHandle) {
                 let settings = state.settings.lock().unwrap().clone();
                 place_capsule(&app, &settings);
                 let _ = app.emit("reload", ());
+            }
+            // The keyboard was attached or detached, or the switch was turned: the capsule goes
+            // where the rule puts it. Between such moments the tray's choice stands
+            let tablet_only = state.settings.lock().unwrap().tablet_only;
+            let now = actions::keyboard_shows_capsule(tablet_only, tablet);
+            if now != by_keyboard {
+                by_keyboard = now;
+                applog(&app, if now { "capsule: shown by the keyboard rule" } else { "capsule: hidden, a keyboard is attached" });
+                set_capsule_visible(&app, now);
             }
         }
     });
@@ -959,6 +999,7 @@ fn main() {
             let (settings, error, created) = load_settings(app.handle());
             let tablet = win::tablet_mode();
             applog(app.handle(), if tablet { "tablet mode: on" } else { "tablet mode: off" });
+            let by_keyboard = actions::keyboard_shows_capsule(settings.tablet_only, tablet);
             app.manage(AppState {
                 settings: Mutex::new(settings),
                 error: Mutex::new(error),
@@ -970,6 +1011,9 @@ fn main() {
                 marks: Mutex::new(Vec::new()),
                 intro: AtomicBool::new(created),
                 update: Mutex::new(Update::None),
+                wanted: AtomicBool::new(by_keyboard),
+                snapping: AtomicBool::new(false),
+                showing: Mutex::new(()),
             });
             grab::start(app.handle().clone());
             if let Some(hwnd) = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()) {
@@ -977,12 +1021,16 @@ fn main() {
             }
             let settings = app.state::<AppState>().settings.lock().unwrap().clone();
             place_capsule(app.handle(), &settings);
-            if let Some(w) = app.get_webview_window("capsule") {
-                let _ = w.show();
+            if by_keyboard {
+                if let Some(w) = app.get_webview_window("capsule") {
+                    let _ = w.show();
+                }
+                // The handle was placed while the capsule was not yet on screen
+                grab::set_visible(true);
+                grab::raise();
+            } else {
+                applog(app.handle(), "capsule: hidden, a keyboard is attached");
             }
-            // The handle was placed while the capsule was not yet on screen
-            grab::set_visible(true);
-            grab::raise();
             applog(app.handle(), "start");
             if let Err(why) = build_tray(app.handle()) {
                 applog(app.handle(), &format!("tray: {why}"));
@@ -992,7 +1040,7 @@ fn main() {
             if created {
                 open_settings_window(app.handle());
             }
-            watch_settings(app.handle().clone());
+            watch_settings(app.handle().clone(), by_keyboard);
             watch_cursor(app.handle().clone());
             if settings.updates {
                 // Once per start, a few seconds in, so the start itself waits for nothing

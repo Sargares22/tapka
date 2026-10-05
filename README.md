@@ -41,6 +41,7 @@ Some antivirus programs are wary of anything that sends key presses, and Tapka d
 - **Four keys in sight, the rest a scroll away.** The list scrolls under your finger; a faded edge says there is more. A small **+** at the foot of the capsule opens the editor.
 - **Stays where you put it.** Drag the capsule by its handle to the left, right or top edge. After a screen rotation or a resolution change it is back at its edge.
 - **Wider apart without a keyboard.** When the keyboard is detached, the keys stand further apart for fingers.
+- **Only when you need it.** Turn on *Only without a keyboard* (Settings → Look), and the capsule hides while a keyboard is attached and comes back when you detach or fold it. The tray icon shows or hides it at any moment.
 - **Your look.** Dark, light or the same as Windows; any accent colour; three sizes.
 - **Russian and English.** Follows the language of Windows; can be switched in the settings.
 - **Quiet updates.** One check per start, a line in the settings and an Update button. No pop-ups. Can be switched off.
@@ -86,6 +87,7 @@ Everything lives in one file, `settings.json`, in `%APPDATA%\sargares22.tapka`; 
 - `action` is `open` (with `target`: a program, a file, a folder, an address, or a `shell:AppsFolder\…` app address) or `hotkey` (with `keys`, like `ctrl+shift+k`).
 - `icon` is a built-in name (`snip`, `paste`, `copy`, `undo`, `mic`, `tasks`, `desktop`, `folder`, `gear`, `keyboard`, `terminal`, `chat`, `browser`) or a PNG/SVG file from the `icons` folder next to the settings file. Without it, a program shows its own icon and anything else shows its first letter.
 - `top` is where the capsule starts along its edge, from 0 to 1.
+- `tablet_only`, when `true`, hides the capsule while a keyboard is attached.
 - Two things can only be set here: the exact `top`, and the `lit` rule below.
 
 A broken item is skipped and the rest keep working; a broken file changes nothing, and the tray tooltip says what is wrong.

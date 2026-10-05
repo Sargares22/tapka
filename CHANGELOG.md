@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.3
+
+- New switch, *Only without a keyboard* (Settings → Look): the capsule hides while a keyboard is attached and comes back when it is detached or folded back. Off by default. The tray icon still shows or hides the capsule at any moment.
+- A capsule hidden from the tray stays hidden after a screenshot taken a moment earlier.
+
 ## 1.0.2
 
 - Less processor use at rest: the cursor is polled slowly while it is away from the capsule, the desktop is not looked over while the capsule is hidden, and a window's program is asked about once.

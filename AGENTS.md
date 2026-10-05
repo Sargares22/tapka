@@ -45,6 +45,9 @@ Skills with step-by-step recipes are in `.agents/skills` (Claude Code: `.claude/
   (`win::set_region`). Changing the window's style drops the region: see `win::quiet_frame`.
 - Dragging is done by Windows through the handle window in `src/grab.rs`. Only
   `grab::set_visible` shows or hides it.
+- Show or hide the capsule only through `set_capsule_visible` in `src/main.rs`: it remembers
+  the choice (`wanted`), which the tray, the keyboard rule (`tablet_only`) and the return after
+  a snapshot all go by.
 - Geometry is in physical pixels: CSS pixels times `px_per_css`.
 - Write the settings file only through `change_settings` in `src/main.rs`.
 - Do not hold a lock across a Win32 call; `win::app_windows` skips the panel's own windows for

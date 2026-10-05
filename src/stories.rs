@@ -211,6 +211,17 @@ fn story_21_tablet_mode_widens_the_step() {
     assert!((pill_height(4, cell(true)) - pill_height(4, cell(false)) - 4.0 * (cell(true) - cell(false))).abs() < 1e-9);
 }
 #[test]
+fn story_22_capsule_hides_with_a_keyboard_when_asked() {
+    use crate::actions::keyboard_shows_capsule;
+    // Out of the box the keyboard changes nothing: the capsule is on screen either way
+    assert!(!parse(r#"{"items":[]}"#).unwrap().0.tablet_only);
+    assert!(keyboard_shows_capsule(false, false) && keyboard_shows_capsule(false, true));
+    // Asked to show only without a keyboard: away while it is attached, back when it is not
+    assert!(!keyboard_shows_capsule(true, false));
+    assert!(keyboard_shows_capsule(true, true));
+}
+
+#[test]
 fn story_23_default_position() {
     use crate::layout::{window_rect, ROOM, CELL};
     // The default file and a file without `top` both put the pill's top edge at 0.3 of the work area

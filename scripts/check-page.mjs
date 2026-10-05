@@ -240,7 +240,7 @@ const settings = {
     { raw: { name: 'Крив', action: 'open', target: 'x', hint: { toString: 0 } }, icon: null, glyph: null, problem: null },
     { raw: { name: 'Цел', action: 'open', target: 'x' }, icon: null, glyph: null, problem: null },
   ],
-  scale: 1, edge: 'right', theme: 'dark', accent: '#8ab4ff', lang: 'system', russian: true, autostart: false, updates: true,
+  scale: 1, edge: 'right', theme: 'dark', accent: '#8ab4ff', lang: 'system', russian: true, autostart: false, updates: true, tablet_only: false,
   version: '1.0.0', error: null, intro: true,
   presets: [{ id: 'snip', item: { name: 'Снимок', icon: 'snip', hint: 'Выделить область экрана', action: 'hotkey', keys: 'win+shift+s' } },
     { id: 'settings', item: { name: 'Параметры', icon: 'gear', hint: 'Открыть параметры Windows', action: 'open', target: 'ms-settings:' } }],
@@ -270,6 +270,7 @@ const editing = `(async () => {
   $('scale').children[2].click(); out.scaleCall = last('set_pref');
   $('edge').children[0].click(); out.edgeCall = last('set_pref');
   $('autostart').click(); out.autostartCall = last('set_pref');
+  $('tablet-only').click(); out.tabletOnlyCall = last('set_pref'); out.tabletOnlyOn = $('tablet-only').classList.contains('on');
   // The add dialog offers four kinds; a Windows action is added by one tap
   $('add').click();
   out.kinds = [...document.querySelectorAll('#body .pick b')].map(b => b.textContent);
@@ -347,6 +348,8 @@ test('theme, accent, size, edge and autostart apply at once and go to Rust one b
   assert.deepEqual(set.scaleCall, { key: 'scale', value: 1.25 });
   assert.deepEqual(set.edgeCall, { key: 'edge', value: 'left' });
   assert.deepEqual(set.autostartCall, { key: 'autostart', value: true });
+  assert.deepEqual(set.tabletOnlyCall, { key: 'tablet_only', value: true });
+  assert.equal(set.tabletOnlyOn, true);
 });
 
 test('an item is added in four ways', () => {

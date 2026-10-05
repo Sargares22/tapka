@@ -56,6 +56,8 @@ pub struct Settings {
     pub lang: Lang,
     /// Ask GitHub for a newer release once per start.
     pub updates: bool,
+    /// The capsule is on screen only in tablet mode: with a keyboard attached it hides itself.
+    pub tablet_only: bool,
     pub items: Vec<Item>,
 }
 
@@ -70,6 +72,7 @@ impl Settings {
             accent: DEFAULT_ACCENT.into(),
             lang: Lang::System,
             updates: true,
+            tablet_only: false,
             items: Vec::new(),
         }
     }
@@ -274,6 +277,7 @@ pub fn parse(text: &str) -> Result<(Settings, Vec<String>), String> {
             _ => Lang::System,
         },
         updates: v.get("updates").and_then(Value::as_bool).unwrap_or(true),
+        tablet_only: v.get("tablet_only").and_then(Value::as_bool).unwrap_or(false),
         items: good,
     };
     Ok((settings, skipped))
@@ -413,6 +417,10 @@ mod tests {
     #[test]
     fn theme_accent_language_and_updates_come_from_the_file() {
         let (s, _) = parse(r#"{"items":[]}"#).unwrap();
+        // A file from before the switch existed: the capsule stays on screen with a keyboard too
+        assert!(!s.tablet_only);
+        assert!(parse(r#"{"tablet_only":true,"items":[]}"#).unwrap().0.tablet_only);
+        assert!(!parse(r#"{"tablet_only":"yes","items":[]}"#).unwrap().0.tablet_only);
         assert_eq!((s.theme, s.accent.as_str(), s.lang, s.updates), (Theme::System, DEFAULT_ACCENT, Lang::System, true));
         let (s, _) = parse(r##"{"theme":"light","accent":"#FF8800","lang":"en","updates":false,"items":[]}"##).unwrap();
         assert_eq!((s.theme, s.accent.as_str(), s.lang, s.updates), (Theme::Light, "#ff8800", Lang::En, false));

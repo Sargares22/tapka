@@ -61,6 +61,13 @@ pub fn capsule_returns(snip: Snip, hidden_ms: u64) -> bool {
     }
 }
 
+/// Where the keyboard puts the capsule: on screen, unless the user asked to see it only in tablet
+/// mode and a keyboard is attached. The tray and a second launch may then say otherwise, until
+/// the keyboard is attached or detached again.
+pub fn keyboard_shows_capsule(tablet_only: bool, tablet: bool) -> bool {
+    !tablet_only || tablet
+}
+
 /// Does a window belong to the program an `open` target starts? `exe` is the window's program
 /// file name in lower case, `family` its Store package family, if it has one.
 /// A target that is a path to an exe matches by file name; a `shell:AppsFolder\<family>!<app>`

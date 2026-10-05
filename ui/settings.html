@@ -140,6 +140,8 @@
           <div class="seg" id="scale"><button data-v="0.8">S</button><button data-v="1">M</button><button data-v="1.25">L</button></div></div>
         <div class="row"><div class="label"><span data-t="edge"></span><small data-t="edge_sub"></small></div>
           <div class="seg" id="edge"><button data-v="left" data-t="edge_left"></button><button data-v="top" data-t="edge_top"></button><button data-v="right" data-t="edge_right"></button></div></div>
+        <div class="row"><div class="label"><span data-t="tablet_only"></span><small data-t="tablet_only_sub"></small></div>
+          <button class="switch" id="tablet-only" role="switch"></button></div>
       </div>
     </section>
     <section id="s-general">
@@ -196,6 +198,7 @@
       accent: 'Цвет акцента', accent_sub: 'Метки, подсветка и кнопки', accent_own: 'Свой цвет',
       size: 'Размер капсулы', size_sub: 'Три размера клавиш', edge: 'Край экрана', edge_sub: 'Капсулу можно и перенести за ручку',
       edge_left: 'Слева', edge_top: 'Сверху', edge_right: 'Справа',
+      tablet_only: 'Только без клавиатуры', tablet_only_sub: 'С подключённой клавиатурой капсула прячется. Показать её можно из значка в трее',
       lang: 'Язык', lang_system: 'Как в Windows', autostart: 'Автозагрузка', autostart_sub: 'Запускать панель вместе с Windows',
       updates: 'Проверять обновления', updates_sub: 'Один запрос к GitHub при запуске панели',
       update_check: 'Проверить', update_go: 'Обновить', update_none: 'Обновления не проверялись', update_off: 'Проверка обновлений выключена',
@@ -226,6 +229,7 @@
       accent: 'Accent colour', accent_sub: 'Marks, highlights and buttons', accent_own: 'Custom colour',
       size: 'Capsule size', size_sub: 'Three sizes of keys', edge: 'Screen edge', edge_sub: 'The capsule can also be dragged by its handle',
       edge_left: 'Left', edge_top: 'Top', edge_right: 'Right',
+      tablet_only: 'Only without a keyboard', tablet_only_sub: 'With a keyboard attached the capsule hides. The tray icon brings it back',
       lang: 'Language', lang_system: 'Same as Windows', autostart: 'Start with Windows', autostart_sub: 'Launch the panel with Windows',
       updates: 'Check for updates', updates_sub: 'One request to GitHub when the panel starts',
       update_check: 'Check', update_go: 'Update', update_none: 'Not checked yet', update_off: 'Update checks are off',
@@ -560,6 +564,7 @@
     for (const b of $('edge').children) b.classList.toggle('on', b.dataset.v === S.edge);
     $('autostart').classList.toggle('on', S.autostart);
     $('updates').classList.toggle('on', S.updates);
+    $('tablet-only').classList.toggle('on', S.tablet_only);
     const own = el('input', { type: 'color', value: S.accent, title: t('accent_own') });
     own.oninput = () => {
       S.accent = own.value; paint();
@@ -583,6 +588,7 @@
   $('edge').onclick = e => { const b = e.target.closest('button'); if (b) setPref('edge', b.dataset.v); };
   $('autostart').onclick = () => setPref('autostart', !S.autostart);
   $('updates').onclick = () => setPref('updates', !S.updates).then(refresh);
+  $('tablet-only').onclick = () => setPref('tablet_only', !S.tablet_only);
   $('open-file').onclick = () => invoke('open_settings_file');
   $('open-log').onclick = () => invoke('open_log_folder');
   $('github').onclick = () => invoke('open_github');
