@@ -136,13 +136,15 @@ pub fn start(app: AppHandle) {
 }
 
 /// Lays the handle window over the capsule's handle, `(x, y, width, height)` on the screen in
-/// physical px, above the capsule.
+/// physical px, above the capsule. Placing never shows it: it is shown and hidden together with
+/// the capsule by `set_visible` alone, so a capsule hidden for a screenshot keeps its handle
+/// hidden whatever is placed meanwhile.
 pub fn place(rect: (i32, i32, i32, i32)) {
     if HANDLE.load(Ordering::Relaxed) == 0 {
         return;
     }
     unsafe {
-        let _ = SetWindowPos(handle(), Some(HWND_TOPMOST), rect.0, rect.1, rect.2, rect.3, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        let _ = SetWindowPos(handle(), Some(HWND_TOPMOST), rect.0, rect.1, rect.2, rect.3, SWP_NOACTIVATE);
     }
 }
 

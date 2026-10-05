@@ -6,17 +6,18 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY,
 };
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass, ShellExecuteW};
-use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WAIT_TIMEOUT, WPARAM};
 use windows::Win32::Globalization::GetUserDefaultUILanguage;
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Storage::Packaging::Appx::GetPackageFamilyName;
 use windows::Win32::System::Threading::{
-    GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE,
 };
 use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_OR};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetCursorPos, GetForegroundWindow, InternalGetWindowText, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
-    GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindowAsync,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindowAsync,
     GWL_EXSTYLE, GW_OWNER, WM_NCACTIVATE, WM_NCPAINT, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_MINIMIZE, SW_RESTORE, WS_EX_TOOLWINDOW,
     SM_CONVERTIBLESLATEMODE, SW_HIDE, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
 };
@@ -83,6 +84,10 @@ pub fn set_visible(hwnd: isize, visible: bool) {
 pub fn tablet_mode() -> bool {
     unsafe { GetSystemMetrics(SM_CONVERTIBLESLATEMODE) == 0 }
 }
+pub fn is_visible(hwnd: isize) -> bool {
+    unsafe { IsWindowVisible(HWND(hwnd as _)).as_bool() }
+}
+
 /// Where the mouse cursor is inside a visible window, in physical px from its top-left corner;
 /// `None` when the cursor is elsewhere or the window is hidden.
 pub fn cursor_in_window(hwnd: isize) -> Option<(i32, i32)> {
@@ -132,9 +137,23 @@ pub struct AppWindow {
 
 fn program_of(hwnd: HWND) -> Option<(String, Option<String>)> {
     let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    program_of_process(pid)
+}
+
+/// The file name of a process's program, lower case, and its Store package family if it has one.
+fn program_of_process(pid: u32) -> Option<(String, Option<String>)> {
     unsafe {
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let program = program_behind(process);
+        let _ = CloseHandle(process);
+        program
+    }
+}
+
+/// The same for a process that is already open.
+fn program_behind(process: HANDLE) -> Option<(String, Option<String>)> {
+    unsafe {
         let mut path = [0u16; 1024];
         let mut len = path.len() as u32;
         let named = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(path.as_mut_ptr()), &mut len).is_ok();
@@ -142,7 +161,6 @@ fn program_of(hwnd: HWND) -> Option<(String, Option<String>)> {
         let mut family_len = family.len() as u32;
         // 0 is ERROR_SUCCESS; an unpackaged program answers APPMODEL_ERROR_NO_PACKAGE
         let packaged = GetPackageFamilyName(process, &mut family_len, Some(PWSTR(family.as_mut_ptr()))).0 == 0;
-        let _ = CloseHandle(process);
         if !named {
             return None;
         }
@@ -155,10 +173,45 @@ fn program_of(hwnd: HWND) -> Option<(String, Option<String>)> {
     }
 }
 
+/// What the last look over the desktop learned: which program each window belongs to. The
+/// desktop is looked over twice a second, and asking Windows about a process is the costly part
+/// of it, so a window that is still there with the same process is not asked about again.
+/// Windows may hand the number of a closed process to a new one, so the process is kept open
+/// while it is remembered: an open process keeps its number, and one that has ended says so.
+struct Known {
+    hwnd: isize,
+    pid: u32,
+    /// The open process, as a number so the note can cross threads.
+    process: isize,
+    program: (String, Option<String>),
+}
+
+impl Known {
+    fn alive(&self) -> bool {
+        unsafe { WaitForSingleObject(HANDLE(self.process as _), 0) == WAIT_TIMEOUT }
+    }
+}
+
+impl Drop for Known {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(HANDLE(self.process as _));
+        }
+    }
+}
+
+/// Held for a whole look, so two looks at once do not undo each other's notes.
+static KNOWN: std::sync::Mutex<Vec<Known>> = std::sync::Mutex::new(Vec::new());
+
 /// Every program window on the desktop, front to back.
 pub fn app_windows() -> Vec<AppWindow> {
+    struct Look {
+        before: Vec<Known>,
+        now: Vec<Known>,
+        found: Vec<AppWindow>,
+    }
     unsafe extern "system" fn each(hwnd: HWND, lp: LPARAM) -> BOOL {
-        let found = &mut *(lp.0 as *mut Vec<AppWindow>);
+        let look = &mut *(lp.0 as *mut Look);
         // The panel's own windows are skipped before anything is asked of them: asking a window
         // for its title from another thread waits for the thread that owns it, and that is the
         // panel's main thread, which may itself be waiting for whoever called this.
@@ -173,21 +226,49 @@ pub fn app_windows() -> Vec<AppWindow> {
         let mut cloaked = 0u32;
         let _ = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, 4);
         let plain = cloaked == 0
-            && GetWindowTextLengthW(hwnd) > 0
+            // The title is read from the system's own copy: asking the window itself would wait
+            // for its program to answer, twice a second, for every window
+            && InternalGetWindowText(hwnd, &mut [0u16; 2]) > 0
             && GetWindow(hwnd, GW_OWNER).map(|o| o.0.is_null()).unwrap_or(true)
             && GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 == 0;
-        if plain {
-            if let Some((exe, family)) = program_of(hwnd) {
-                found.push(AppWindow { hwnd: hwnd.0 as isize, exe, family });
+        if !plain {
+            return BOOL(1);
+        }
+        let key = hwnd.0 as isize;
+        if let Some(at) = look.before.iter().position(|k| k.hwnd == key && k.pid == pid && k.alive()) {
+            let known = look.before.swap_remove(at);
+            look.found.push(AppWindow { hwnd: key, exe: known.program.0.clone(), family: known.program.1.clone() });
+            look.now.push(known);
+            return BOOL(1);
+        }
+        // A process that lets itself be watched is remembered; one that does not is asked about
+        // at every look
+        match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE, false, pid) {
+            Ok(process) => match program_behind(process) {
+                Some(program) => {
+                    look.found.push(AppWindow { hwnd: key, exe: program.0.clone(), family: program.1.clone() });
+                    look.now.push(Known { hwnd: key, pid, process: process.0 as isize, program });
+                }
+                None => {
+                    let _ = CloseHandle(process);
+                }
+            },
+            Err(_) => {
+                if let Some((exe, family)) = program_of_process(pid) {
+                    look.found.push(AppWindow { hwnd: key, exe, family });
+                }
             }
         }
         BOOL(1)
     }
-    let mut found: Vec<AppWindow> = Vec::new();
+    let mut known = KNOWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut look = Look { before: std::mem::take(&mut *known), now: Vec::new(), found: Vec::new() };
     unsafe {
-        let _ = EnumWindows(Some(each), LPARAM(&mut found as *mut Vec<AppWindow> as isize));
+        let _ = EnumWindows(Some(each), LPARAM(&mut look as *mut Look as isize));
     }
-    found
+    // Only what this look saw is kept: windows that are gone are forgotten
+    *known = look.now;
+    look.found
 }
 
 /// The active window.

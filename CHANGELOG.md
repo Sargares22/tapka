@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2
+
+- Less processor use at rest: the cursor is polled slowly while it is away from the capsule, the desktop is not looked over while the capsule is hidden, and a window's program is asked about once.
+- The handle no longer reappears on its own while the capsule is hidden for a screenshot.
+- The intro video plays on the repository page.
+
 ## 1.0.1
 
 - Settings saved at the same moment from two places no longer overwrite each other.

@@ -814,7 +814,11 @@ fn watch_cursor(app: AppHandle) {
     std::thread::spawn(move || {
         let mut last = None;
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(80));
+            // Close by, the cursor is followed often enough for the highlight to keep up; away
+            // from the capsule, or with the capsule hidden, a slow look is enough to notice it
+            // coming back, and the processor is left to sleep
+            let pause = if last.is_some() { 80 } else { 250 };
+            std::thread::sleep(std::time::Duration::from_millis(pause));
             if app.state::<AppState>().carry.lock().unwrap().is_some() {
                 continue;
             }
@@ -845,6 +849,7 @@ fn watch_settings(app: AppHandle) {
     std::thread::spawn(move || {
         let mut seen = modified();
         let mut seen_screen = screen(&app);
+        let mut was_shown = true;
         loop {
             std::thread::sleep(std::time::Duration::from_millis(500));
             let now = modified();
@@ -866,12 +871,15 @@ fn watch_settings(app: AppHandle) {
                 place_capsule(&app, &settings);
                 let _ = app.emit("reload", ());
             }
-            if state.carry.lock().unwrap().is_none() {
+            // A hidden capsule shows no marks and needs no handle above it: the desktop is not
+            // looked over until it is back
+            let shown = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).is_some_and(|h| win::is_visible(h.0 as isize));
+            if shown && state.carry.lock().unwrap().is_none() {
                 grab::raise();
             }
             // A program an item opens appeared or closed: the page marks the item
             let items = state.settings.lock().unwrap().items.clone();
-            let now = item_marks(&items);
+            let now = if shown { item_marks(&items) } else { state.marks.lock().unwrap().clone() };
             let changed = {
                 let mut marks = state.marks.lock().unwrap();
                 let changed = *marks != now;
@@ -880,7 +888,11 @@ fn watch_settings(app: AppHandle) {
                 }
                 changed
             };
-            if changed {
+            // Back from hiding, the page is told the marks whether or not they differ from the
+            // last ones sent: it may have redrawn itself in between
+            let back = shown && !was_shown;
+            was_shown = shown;
+            if changed || back {
                 let _ = app.emit("marks", now);
             }
             if state.tablet.swap(tablet, Ordering::Relaxed) != tablet {
@@ -968,6 +980,8 @@ fn main() {
             if let Some(w) = app.get_webview_window("capsule") {
                 let _ = w.show();
             }
+            // The handle was placed while the capsule was not yet on screen
+            grab::set_visible(true);
             grab::raise();
             applog(app.handle(), "start");
             if let Err(why) = build_tray(app.handle()) {
