@@ -1,8 +1,8 @@
 [package]
 name = "tapka"
-version = "1.0.3"
+version = "1.1.0"
 edition = "2021"
-license = "WTFPL"
+license = "MIT"
 authors = ["Sargares22"]
 repository = "https://github.com/Sargares22/tapka"
 description = "Touch panel for Windows 11: a capsule of big keys at the screen edge"

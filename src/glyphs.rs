@@ -2,7 +2,7 @@
 //! extension: `"icon": "snip"`. All of them are drawn for the project, in `currentColor`. There
 //! are no marks of other products here: a program's picture comes from the program itself.
 
-const GLYPHS: [(&str, &str); 13] = [
+const GLYPHS: [(&str, &str); 20] = [
     ("snip", include_str!("../glyphs/snip.svg")),
     ("paste", include_str!("../glyphs/paste.svg")),
     ("copy", include_str!("../glyphs/copy.svg")),
@@ -16,6 +16,13 @@ const GLYPHS: [(&str, &str); 13] = [
     ("terminal", include_str!("../glyphs/terminal.svg")),
     ("chat", include_str!("../glyphs/chat.svg")),
     ("browser", include_str!("../glyphs/browser.svg")),
+    ("clipboard", include_str!("../glyphs/clipboard.svg")),
+    ("emoji", include_str!("../glyphs/emoji.svg")),
+    ("volumeup", include_str!("../glyphs/volumeup.svg")),
+    ("volumedown", include_str!("../glyphs/volumedown.svg")),
+    ("mute", include_str!("../glyphs/mute.svg")),
+    ("playpause", include_str!("../glyphs/playpause.svg")),
+    ("nexttrack", include_str!("../glyphs/nexttrack.svg")),
 ];
 
 /// The SVG text of a built-in icon, or `None` if there is no such name. It is drawn in

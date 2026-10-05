@@ -42,6 +42,14 @@ fn key(name: &str) -> Option<u16> {
         "right" => 0x27,
         "down" => 0x28,
         "printscreen" => 0x2C,
+        "." | "period" => 0xBE,
+        "," | "comma" => 0xBC,
+        "volumemute" | "mute" => 0xAD,
+        "volumedown" => 0xAE,
+        "volumeup" => 0xAF,
+        "nexttrack" => 0xB0,
+        "prevtrack" => 0xB1,
+        "playpause" => 0xB3,
         _ => return None,
     })
 }
@@ -93,6 +101,19 @@ mod tests {
         assert_eq!(parse("alt+f24").unwrap(), [VK_ALT, 0x87]);
         assert_eq!(parse("win+1").unwrap(), [VK_LWIN, 0x31]);
         assert_eq!(parse("printscreen").unwrap(), [0x2C]);
+    }
+
+    #[test]
+    fn media_keys_and_punctuation() {
+        assert_eq!(parse("volumeup").unwrap(), [0xAF]);
+        assert_eq!(parse("volumedown").unwrap(), [0xAE]);
+        assert_eq!(parse("volumemute").unwrap(), parse("mute").unwrap());
+        assert_eq!(parse("playpause").unwrap(), [0xB3]);
+        assert_eq!(parse("nexttrack").unwrap(), [0xB0]);
+        assert_eq!(parse("prevtrack").unwrap(), [0xB1]);
+        assert_eq!(parse("win+.").unwrap(), [VK_LWIN, 0xBE]);
+        assert_eq!(parse("ctrl+period").unwrap(), [VK_CONTROL, 0xBE]);
+        assert_eq!(parse("alt+,").unwrap(), parse("alt+comma").unwrap());
     }
 
     #[test]

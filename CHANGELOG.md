@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+- New ready-made Windows actions: louder, quieter, mute, play/pause, next track, clipboard history (Win+V) and emoji (Win+.), each with its own icon.
+- A shortcut can use the sound and music keys, the period and the comma.
+- The licence is MIT (it was WTFPL).
+- The taskbar can now be placed at the side of the screen in Windows 11; the README and the spec say what Tapka still does that the taskbar does not.
+- README: a recipe for deep links (ms-settings:, claude://, codex:// and the like as keys).
+
 ## 1.0.3
 
 - New switch, *Only without a keyboard* (Settings → Look): the capsule hides while a keyboard is attached and comes back when it is detached or folded back. Off by default. The tray icon still shows or hides the capsule at any moment.

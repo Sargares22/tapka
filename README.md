@@ -7,14 +7,14 @@
 <p align="center">
   <a href="https://github.com/Sargares22/tapka/releases/latest"><img src="https://img.shields.io/github/v/release/Sargares22/tapka?color=8ab4ff" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Windows%2011-ARM64%20%7C%20x64-8ab4ff" alt="Windows 11, ARM64 and x64">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-WTFPL-8ab4ff" alt="WTFPL"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8ab4ff" alt="MIT"></a>
 </p>
 
 <p align="center">
   <a href="#install">Install</a> · <a href="#what-it-does">What it does</a> · <a href="#your-own-keys">Your own keys</a> · <a href="#recipes">Recipes</a> · <a href="#privacy">Privacy</a> · <a href="CHANGELOG.md">What's new</a>
 </p>
 
-Tapka is a touch panel for Windows 11: a narrow capsule at the screen edge with big keys. A key starts a program, opens a site, a file or a folder, or sends a keyboard shortcut to the window you were working in. It is made for tablets and 2-in-1s, where the keyboard is folded away and with it go snipping, pasting and dictation. Works with a finger, a pen and a mouse.
+Tapka is a touch panel for Windows 11: a narrow capsule at the edge of the screen with large keys. A key sends a keyboard shortcut to the window you were working in, or launches a program, opens a site, a file or a folder. Made for tablets and 2-in-1s: when the keyboard is detached, snipping, paste, dictation and volume go with it, and the taskbar, even placed at the side, sends no shortcuts. The capsule can hide itself while a keyboard is attached. Works with a finger, a pen and a mouse.
 
 <p align="center">
   <img src="assets/capsule-dark.png" width="300" alt="The capsule, dark theme">
@@ -36,17 +36,17 @@ Some antivirus programs are wary of anything that sends key presses, and Tapka d
 ## What it does
 
 - **Never takes focus.** You tap a key, the shortcut goes to the window you were in, and that window stays active.
+- **Only when you need it.** Turn on *Only without a keyboard* (Settings → Look), and the capsule hides while a keyboard is attached and comes back when you detach or fold it. The tray icon shows or hides it at any moment.
 - **Snip without the capsule in the shot.** The Snip key hides the capsule while you select the area and brings it back when you are done.
-- **Behaves like the taskbar.** A key whose program is running carries a mark; tapping it again brings the window forward or minimizes it. Tapka never closes anything.
 - **Four keys in sight, the rest a scroll away.** The list scrolls under your finger; a faded edge says there is more. A small **+** at the foot of the capsule opens the editor.
 - **Stays where you put it.** Drag the capsule by its handle to the left, right or top edge. After a screen rotation or a resolution change it is back at its edge.
 - **Wider apart without a keyboard.** When the keyboard is detached, the keys stand further apart for fingers.
-- **Only when you need it.** Turn on *Only without a keyboard* (Settings → Look), and the capsule hides while a keyboard is attached and comes back when you detach or fold it. The tray icon shows or hides it at any moment.
+- **Behaves like the taskbar.** A key whose program is running carries a mark; tapping it again brings the window forward or minimizes it. Tapka never closes anything.
 - **Your look.** Dark, light or the same as Windows; any accent colour; three sizes.
 - **Russian and English.** Follows the language of Windows; can be switched in the settings.
 - **Quiet updates.** One check per start, a line in the settings and an Update button. No pop-ups. Can be switched off.
 
-Ready-made Windows actions: snip an area, paste, copy, undo, voice typing, task view, show desktop, File Explorer, Settings, on-screen keyboard.
+Ready-made Windows actions: snip an area, paste, copy, undo, voice typing, task view, show desktop, File Explorer, Settings, on-screen keyboard, clipboard history, emoji, louder, quieter, mute, play/pause, next track.
 
 ## Your own keys
 
@@ -107,7 +107,9 @@ Tapka is not tied to any other program. These are examples of what people connec
 
 **A folder you live in.** *Add → Site, file or folder → Folder…*
 
-**A shortcut of another program.** If an action has a keyboard shortcut made of Ctrl, Shift, Alt, Win and a letter, a digit, F1–F24 or a navigation key, it can be a key: mute in a call, a screenshot tool. Punctuation, numpad and media keys are not supported yet. Shortcuts do not reach programs running as administrator: Windows does not let an ordinary program send keys to them.
+**Deep links: a program opened right where you need it.** The *Site, file or folder* field takes any address Windows knows how to open, not only `https://`. So a key can be a link into a program: `ms-settings:bluetooth` opens Bluetooth in Settings, `ms-availablenetworks:` shows the Wi‑Fi list, `ms-actioncenter:` opens notifications, `claude://code/new?folder=C:\Projects\mine` starts a new Claude Code session in that folder, `codex://threads/new?path=C:\Projects\mine` does the same for Codex, `tg://resolve?domain=name` opens a Telegram chat. Which schemes exist on your machine depends on what is installed; a long list lives at [awesome-deeplinks](https://github.com/f/awesome-deeplinks).
+
+**A shortcut of another program.** If an action has a keyboard shortcut made of Ctrl, Shift, Alt, Win and a letter, a digit, F1–F24 or a navigation key, a media key, a period or a comma, it can be a key: mute in a call, a screenshot tool. The numpad is not supported yet. Shortcuts do not reach programs running as administrator: Windows does not let an ordinary program send keys to them.
 
 ## Privacy
 
@@ -135,4 +137,4 @@ Rust, Tauri 2 and WebView2; one binary, two pages, one settings file.
 
 ## License
 
-[WTFPL](LICENSE). The program comes as is, with no warranty of any kind: if something breaks, it is yours to keep. The built-in icons are drawn for this project; see [glyphs/NOTICE.md](glyphs/NOTICE.md).
+[MIT](LICENSE). The program comes as is, with no warranty of any kind: if something breaks, it is yours to keep. The built-in icons are drawn for this project; see [glyphs/NOTICE.md](glyphs/NOTICE.md).

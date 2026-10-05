@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Tapka",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "identifier": "sargares22.tapka",
   "build": {
     "frontendDist": "ui"
@@ -39,7 +39,7 @@
     ],
     "publisher": "Sargares22",
     "shortDescription": "Touch panel for Windows 11",
-    "license": "WTFPL",
+    "license": "MIT",
     "createUpdaterArtifacts": true,
     "windows": {
       "webviewInstallMode": {

@@ -2,8 +2,8 @@
 
 use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY,
+    MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, VIRTUAL_KEY,
 };
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass, ShellExecuteW};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WAIT_TIMEOUT, WPARAM};
@@ -42,8 +42,8 @@ pub fn open(target: &str) -> Result<(), String> {
 }
 
 fn key_input(vk: u16, up: bool) -> INPUT {
-    // Win, the arrows and the navigation block are extended keys
-    let extended = matches!(vk, 0x5B | 0x5C | 0x21..=0x28 | 0x2D | 0x2E);
+    // Win, the arrows, the navigation block and the sound and music keys are extended keys
+    let extended = matches!(vk, 0x5B | 0x5C | 0x21..=0x28 | 0x2D | 0x2E | 0xAD..=0xB3);
     let mut flags = KEYBD_EVENT_FLAGS(0);
     if extended {
         flags |= KEYEVENTF_EXTENDEDKEY;
@@ -51,9 +51,10 @@ fn key_input(vk: u16, up: bool) -> INPUT {
     if up {
         flags |= KEYEVENTF_KEYUP;
     }
+    let scan = unsafe { MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) } as u16;
     INPUT {
         r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), dwFlags: flags, ..Default::default() } },
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), wScan: scan, dwFlags: flags, ..Default::default() } },
     }
 }
 
@@ -412,7 +413,7 @@ mod live {
     #[ignore = "manual: presses real keys on the desktop"]
     fn ready_actions() {
         let wait = |ms| std::thread::sleep(std::time::Duration::from_millis(ms));
-        for (keys, close) in [("win+shift+s", "esc"), ("win+h", "esc"), ("win+tab", "esc"), ("win+ctrl+o", "win+ctrl+o"), ("win+d", "win+d"), ("win+e", "alt+f4")] {
+        for (keys, close) in [("win+shift+s", "esc"), ("win+h", "esc"), ("win+tab", "esc"), ("win+ctrl+o", "win+ctrl+o"), ("win+d", "win+d"), ("win+e", "alt+f4"), ("win+v", "esc"), ("win+.", "esc")] {
             let before = visible();
             press(keys);
             wait(2500);
@@ -421,6 +422,14 @@ mod live {
             let gone = before.iter().filter(|w| !after.contains(w)).count();
             println!("{keys}: front {:?}, appeared {new:?}, gone {gone}", foreground_program());
             press(close);
+            wait(1500);
+        }
+        // Sound and music: pressed twice, so the volume and the playback end where they began
+        for keys in ["volumeup", "volumedown", "volumemute", "playpause", "nexttrack"] {
+            press(keys);
+            wait(1500);
+            press(keys);
+            println!("{keys}: sent twice");
             wait(1500);
         }
     }

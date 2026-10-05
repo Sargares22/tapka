@@ -171,7 +171,7 @@
       <h1 data-t="nav_about"></h1>
       <div class="card">
         <div class="row"><div class="label"><span>Tapka</span><small data-t="about_sub"></small></div><span class="sub" id="version"></span></div>
-        <div class="row"><div class="label"><span data-t="license"></span><small data-t="license_sub"></small></div><span class="sub">WTFPL</span></div>
+        <div class="row"><div class="label"><span data-t="license"></span><small data-t="license_sub"></small></div><span class="sub">MIT</span></div>
         <div class="row"><div class="label"><span>GitHub</span><small>github.com/Sargares22/tapka</small></div><button class="btn" id="github" data-t="open"></button></div>
       </div>
       <h2 data-t="privacy"></h2>
@@ -470,9 +470,12 @@
   // A shortcut: pressed on a keyboard, or put together with the buttons when there is none.
   // Windows keeps some Win shortcuts to itself, so the Win key can always be added by hand.
   const KEYS = [...'abcdefghijklmnopqrstuvwxyz0123456789', ...Array.from({ length: 12 }, (_, i) => 'f' + (i + 1)),
-    'space', 'enter', 'tab', 'esc', 'backspace', 'delete', 'insert', 'home', 'end', 'pageup', 'pagedown', 'left', 'up', 'right', 'down', 'printscreen'];
+    'space', 'enter', 'tab', 'esc', 'backspace', 'delete', 'insert', 'home', 'end', 'pageup', 'pagedown', 'left', 'up', 'right', 'down', 'printscreen',
+    '.', ',', 'volumeup', 'volumedown', 'volumemute', 'playpause', 'nexttrack', 'prevtrack'];
   const CODES = { Space: 'space', Enter: 'enter', Tab: 'tab', Escape: 'esc', Backspace: 'backspace', Delete: 'delete', Insert: 'insert', Home: 'home', End: 'end',
-    PageUp: 'pageup', PageDown: 'pagedown', ArrowLeft: 'left', ArrowUp: 'up', ArrowRight: 'right', ArrowDown: 'down', PrintScreen: 'printscreen' };
+    PageUp: 'pageup', PageDown: 'pagedown', ArrowLeft: 'left', ArrowUp: 'up', ArrowRight: 'right', ArrowDown: 'down', PrintScreen: 'printscreen',
+    Period: '.', Comma: ',', AudioVolumeUp: 'volumeup', AudioVolumeDown: 'volumedown', AudioVolumeMute: 'volumemute',
+    MediaPlayPause: 'playpause', MediaTrackNext: 'nexttrack', MediaTrackPrevious: 'prevtrack' };
   const keyName = e => /^Key[A-Z]$/.test(e.code) ? e.code[3].toLowerCase() : /^Digit\d$/.test(e.code) ? e.code[5] : /^F\d{1,2}$/.test(e.code) ? e.code.toLowerCase() : CODES[e.code] || null;
   let onKeys = null;
   const stopKeys = () => { if (onKeys) window.removeEventListener('keydown', onKeys, true); onKeys = null; };

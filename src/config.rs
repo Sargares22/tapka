@@ -92,7 +92,7 @@ pub struct Preset {
     pub en: (&'static str, &'static str),
 }
 
-pub const PRESETS: [Preset; 10] = [
+pub const PRESETS: [Preset; 17] = [
     Preset { id: "snip", icon: "snip", action: ("hotkey", "win+shift+s"), ru: ("Снимок", "Выделить область экрана, снимок уйдёт в буфер"), en: ("Snip", "Select a screen area; the shot goes to the clipboard") },
     Preset { id: "paste", icon: "paste", action: ("hotkey", "ctrl+v"), ru: ("Вставить", "Вставить из буфера в активное окно"), en: ("Paste", "Paste the clipboard into the active window") },
     Preset { id: "copy", icon: "copy", action: ("hotkey", "ctrl+c"), ru: ("Копировать", "Скопировать выделенное в буфер"), en: ("Copy", "Copy the selection to the clipboard") },
@@ -103,6 +103,13 @@ pub const PRESETS: [Preset; 10] = [
     Preset { id: "explorer", icon: "folder", action: ("hotkey", "win+e"), ru: ("Проводник", "Открыть окно Проводника"), en: ("File Explorer", "Open a File Explorer window") },
     Preset { id: "settings", icon: "gear", action: ("open", "ms-settings:"), ru: ("Параметры", "Открыть Параметры Windows"), en: ("Settings", "Open Windows Settings") },
     Preset { id: "keyboard", icon: "keyboard", action: ("hotkey", "win+ctrl+o"), ru: ("Клавиатура", "Показать или убрать экранную клавиатуру"), en: ("Keyboard", "Show or hide the on-screen keyboard") },
+    Preset { id: "clipboard", icon: "clipboard", action: ("hotkey", "win+v"), ru: ("История буфера", "Выбрать, что вставить, из недавно скопированного"), en: ("Clipboard history", "Pick what to paste from recently copied items") },
+    Preset { id: "emoji", icon: "emoji", action: ("hotkey", "win+."), ru: ("Эмодзи", "Панель эмодзи и символов для поля, где стоит курсор"), en: ("Emoji", "Emoji and symbols for the field with the cursor") },
+    Preset { id: "volumeup", icon: "volumeup", action: ("hotkey", "volumeup"), ru: ("Громче", "Прибавить громкость"), en: ("Louder", "Turn the volume up") },
+    Preset { id: "volumedown", icon: "volumedown", action: ("hotkey", "volumedown"), ru: ("Тише", "Убавить громкость"), en: ("Quieter", "Turn the volume down") },
+    Preset { id: "mute", icon: "mute", action: ("hotkey", "volumemute"), ru: ("Без звука", "Выключить или вернуть звук"), en: ("Mute", "Turn the sound off or back on") },
+    Preset { id: "playpause", icon: "playpause", action: ("hotkey", "playpause"), ru: ("Пауза", "Остановить или продолжить музыку и видео"), en: ("Play, pause", "Pause or resume music and video") },
+    Preset { id: "nexttrack", icon: "nexttrack", action: ("hotkey", "nexttrack"), ru: ("Следующий трек", "Перейти к следующей композиции"), en: ("Next track", "Skip to the next track") },
 ];
 
 /// The ready actions a new settings file starts with, in this order.
@@ -496,6 +503,23 @@ mod tests {
         }
         let ids: Vec<_> = PRESETS.iter().map(|p| p.id).collect();
         assert!(DEFAULT_ITEMS.iter().all(|id| ids.contains(id)));
+    }
+
+    #[test]
+    fn the_sound_and_input_actions_survive_the_settings_file() {
+        let ids = ["clipboard", "emoji", "volumeup", "volumedown", "mute", "playpause", "nexttrack"];
+        let presets: Vec<_> = ids.iter().map(|id| PRESETS.iter().find(|p| p.id == *id).unwrap()).collect();
+        let items: Vec<Value> = presets.iter().map(|p| preset_item(p, true)).collect();
+        let text = with_field(OWN, "items", json!(items)).unwrap();
+        let (s, skipped) = parse(&text).unwrap();
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(s.items.len(), ids.len());
+        for (item, preset) in s.items.iter().zip(&presets) {
+            assert_eq!((item.name.as_str(), item.icon.as_deref()), (preset.ru.0, Some(preset.icon)));
+            assert_eq!(item.action, Action::Hotkey(preset.action.1.into()));
+        }
+        // Written again, the file does not change
+        assert_eq!(to_text(&serde_json::from_str(&text).unwrap()), text);
     }
 
     #[test]
