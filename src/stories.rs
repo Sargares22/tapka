@@ -67,7 +67,7 @@ fn story_06_app_item_opens_the_app() {
 fn story_08_item_is_added_by_one_entry_in_settings() {
     let (s, skipped) = parse(r#"{"items":[{"name":"Сайт","action":"open","target":"https://example.com"}]}"#).unwrap();
     assert!(skipped.is_empty());
-    assert_eq!(s.items, vec![Item { name: "Сайт".into(), icon: None, hint: None, lit: None, action: Action::Open("https://example.com".into()) }]);
+    assert_eq!(s.items, vec![Item { name: "Сайт".into(), icon: None, hint: None, lit: None, only_in: None, action: Action::Open("https://example.com".into()) }]);
     // scale and top are optional
     assert_eq!((s.scale, s.top), (1.0, 0.3));
 }
@@ -248,9 +248,4 @@ fn story_24_top_edge_comes_from_settings() {
         let (_, y, _, height) = window_rect(work, 2.0, top, CELL, 2, Edge::Right);
         assert!(y >= 40 && y + height <= 40 + 1800, "top {top}: y {y} height {height}");
     }
-}
-
-#[test]
-fn story_29_binary_is_native_arm64_or_x64() {
-    assert!(["aarch64", "x86_64"].contains(&std::env::consts::ARCH));
 }

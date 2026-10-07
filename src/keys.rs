@@ -54,6 +54,17 @@ fn key(name: &str) -> Option<u16> {
     })
 }
 
+/// The key a `hold` item keeps pressed: Shift, Ctrl, Alt or Space, in any case.
+pub fn holdable(name: &str) -> Option<u16> {
+    Some(match name.trim().to_lowercase().as_str() {
+        "shift" => VK_SHIFT,
+        "ctrl" | "control" => VK_CONTROL,
+        "alt" => VK_ALT,
+        "space" => 0x20,
+        _ => return None,
+    })
+}
+
 /// Parses a hotkey: any number of modifiers and exactly one key, joined with `+`, in any case.
 /// Returns the codes with modifiers first (in the order written) and the key last.
 pub fn parse(text: &str) -> Result<Vec<u16>, String> {
@@ -114,6 +125,17 @@ mod tests {
         assert_eq!(parse("win+.").unwrap(), [VK_LWIN, 0xBE]);
         assert_eq!(parse("ctrl+period").unwrap(), [VK_CONTROL, 0xBE]);
         assert_eq!(parse("alt+,").unwrap(), parse("alt+comma").unwrap());
+    }
+
+    #[test]
+    fn only_three_modifiers_and_space_can_be_held() {
+        assert_eq!(holdable("shift"), Some(VK_SHIFT));
+        assert_eq!(holdable(" Ctrl "), Some(VK_CONTROL));
+        assert_eq!(holdable("alt"), Some(VK_ALT));
+        assert_eq!(holdable("space"), Some(0x20));
+        for other in ["win", "a", "ctrl+shift", "", "enter"] {
+            assert_eq!(holdable(other), None, "{other}");
+        }
     }
 
     #[test]

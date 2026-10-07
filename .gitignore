@@ -6,3 +6,4 @@ Thumbs.db
 gen/
 dist/
 assets/tapka-intro.mp4
+target-installer/

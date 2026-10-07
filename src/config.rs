@@ -14,6 +14,8 @@ pub const DEFAULT_ACCENT: &str = "#8ab4ff";
 pub enum Action {
     Open(String),
     Hotkey(String),
+    /// Keeps one key pressed until the next tap on the item: `shift`, `ctrl`, `alt` or `space`.
+    Hold(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +27,9 @@ pub struct Item {
     /// Lights the item up while another program shows a window: `(program file name in lower
     /// case, window title)`. In the file: `"lit": { "program": "recorder.exe", "window": "Recording" }`.
     pub lit: Option<(String, String)>,
+    /// The item shows only while the active window belongs to this program: its file name or
+    /// its Store package family, in lower case. In the file: `"only_in": "paint.exe"`.
+    pub only_in: Option<String>,
     pub action: Action,
 }
 
@@ -58,6 +63,8 @@ pub struct Settings {
     pub updates: bool,
     /// The capsule is on screen only in tablet mode: with a keyboard attached it hides itself.
     pub tablet_only: bool,
+    /// A quiet click when a tap on a key works. Off unless asked for.
+    pub click_sound: bool,
     pub items: Vec<Item>,
 }
 
@@ -73,6 +80,7 @@ impl Settings {
             lang: Lang::System,
             updates: true,
             tablet_only: false,
+            click_sound: false,
             items: Vec::new(),
         }
     }
@@ -85,18 +93,20 @@ pub struct Preset {
     pub id: &'static str,
     /// A built-in icon.
     pub icon: &'static str,
-    /// `hotkey` or `open`, and its keys or target.
+    /// `hotkey`, `hold` or `open`, and its keys or target.
     pub action: (&'static str, &'static str),
     /// Name and hint, in Russian and in English.
     pub ru: (&'static str, &'static str),
     pub en: (&'static str, &'static str),
 }
 
-pub const PRESETS: [Preset; 17] = [
+pub const PRESETS: [Preset; 23] = [
     Preset { id: "snip", icon: "snip", action: ("hotkey", "win+shift+s"), ru: ("Снимок", "Выделить область экрана, снимок уйдёт в буфер"), en: ("Snip", "Select a screen area; the shot goes to the clipboard") },
     Preset { id: "paste", icon: "paste", action: ("hotkey", "ctrl+v"), ru: ("Вставить", "Вставить из буфера в активное окно"), en: ("Paste", "Paste the clipboard into the active window") },
     Preset { id: "copy", icon: "copy", action: ("hotkey", "ctrl+c"), ru: ("Копировать", "Скопировать выделенное в буфер"), en: ("Copy", "Copy the selection to the clipboard") },
     Preset { id: "undo", icon: "undo", action: ("hotkey", "ctrl+z"), ru: ("Отменить", "Отменить последнее действие в активном окне"), en: ("Undo", "Undo the last action in the active window") },
+    Preset { id: "redo", icon: "redo", action: ("hotkey", "ctrl+y"), ru: ("Повторить", "Вернуть отменённое действие в активном окне"), en: ("Redo", "Redo what was undone in the active window") },
+    Preset { id: "selectall", icon: "select-all", action: ("hotkey", "ctrl+a"), ru: ("Выделить всё", "Выделить всё в активном окне"), en: ("Select all", "Select everything in the active window") },
     Preset { id: "voice", icon: "mic", action: ("hotkey", "win+h"), ru: ("Голосовой ввод", "Диктовка Windows в поле, где стоит курсор"), en: ("Voice typing", "Windows dictation into the field with the cursor") },
     Preset { id: "tasks", icon: "tasks", action: ("hotkey", "win+tab"), ru: ("Представление задач", "Открытые окна и рабочие столы"), en: ("Task view", "All open windows and desktops") },
     Preset { id: "desktop", icon: "desktop", action: ("hotkey", "win+d"), ru: ("Рабочий стол", "Свернуть все окна или вернуть их"), en: ("Desktop", "Minimize all windows or bring them back") },
@@ -110,7 +120,15 @@ pub const PRESETS: [Preset; 17] = [
     Preset { id: "mute", icon: "mute", action: ("hotkey", "volumemute"), ru: ("Без звука", "Выключить или вернуть звук"), en: ("Mute", "Turn the sound off or back on") },
     Preset { id: "playpause", icon: "playpause", action: ("hotkey", "playpause"), ru: ("Пауза", "Остановить или продолжить музыку и видео"), en: ("Play, pause", "Pause or resume music and video") },
     Preset { id: "nexttrack", icon: "nexttrack", action: ("hotkey", "nexttrack"), ru: ("Следующий трек", "Перейти к следующей композиции"), en: ("Next track", "Skip to the next track") },
+    Preset { id: "holdshift", icon: "shift", action: ("hold", "shift"), ru: ("Держать Shift", HOLD_HINT.0), en: ("Hold Shift", HOLD_HINT.1) },
+    Preset { id: "holdctrl", icon: "ctrl", action: ("hold", "ctrl"), ru: ("Держать Ctrl", HOLD_HINT.0), en: ("Hold Ctrl", HOLD_HINT.1) },
+    Preset { id: "holdalt", icon: "alt", action: ("hold", "alt"), ru: ("Держать Alt", HOLD_HINT.0), en: ("Hold Alt", HOLD_HINT.1) },
+    Preset { id: "holdspace", icon: "space", action: ("hold", "space"), ru: ("Держать Space", HOLD_HINT.0), en: ("Hold Space", HOLD_HINT.1) },
 ];
+
+/// The hint of the ready actions that hold a key; the 20 seconds are `actions::HOLD_IDLE_MS`.
+const HOLD_HINT: (&str, &str) =
+    ("До повторного касания, отпускается сам через 20 с без нажатий", "Until tapped again; lets go by itself after 20 s without taps");
 
 /// The ready actions a new settings file starts with, in this order.
 pub const DEFAULT_ITEMS: [&str; 5] = ["snip", "paste", "voice", "explorer", "settings"];
@@ -119,8 +137,79 @@ pub const DEFAULT_ITEMS: [&str; 5] = ["snip", "paste", "voice", "explorer", "set
 pub fn preset_item(preset: &Preset, russian: bool) -> Value {
     let (name, hint) = if russian { preset.ru } else { preset.en };
     let (kind, value) = preset.action;
-    let field = if kind == "hotkey" { "keys" } else { "target" };
+    let field = if kind == "open" { "target" } else { "keys" };
     json!({ "name": name, "icon": preset.icon, "hint": hint, "action": kind, field: value })
+}
+
+/// Pages of Windows Settings the editor offers: the address and the name in Russian and in English.
+/// The addresses are Windows' own and open on any Windows 11.
+pub const PAGES: [(&str, &str, &str); 10] = [
+    ("ms-settings:bluetooth", "Bluetooth", "Bluetooth"),
+    ("ms-settings:network-wifi", "Wi-Fi", "Wi-Fi"),
+    ("ms-settings:sound", "Звук", "Sound"),
+    ("ms-settings:display", "Экран", "Display"),
+    ("ms-settings:nightlight", "Ночной свет", "Night light"),
+    ("ms-settings:batterysaver", "Батарея", "Battery"),
+    ("ms-settings:notifications", "Уведомления", "Notifications"),
+    ("ms-settings:printers", "Принтеры", "Printers"),
+    ("ms-settings:windowsupdate", "Обновление", "Windows Update"),
+    ("ms-settings:pen", "Перо", "Pen"),
+];
+
+/// The item of the settings file a page of Windows Settings makes, with the built-in settings icon.
+pub fn page_item(page: &(&str, &str, &str), russian: bool) -> Value {
+    let (target, ru, en) = *page;
+    json!({ "name": if russian { ru } else { en }, "icon": "gear", "action": "open", "target": target })
+}
+
+/// A ready set: ready actions the editor adds together, all of them for one program if asked.
+pub struct Bundle {
+    pub id: &'static str,
+    /// Its name in Russian and in English.
+    pub ru: &'static str,
+    pub en: &'static str,
+    /// The ready actions it adds, in this order.
+    pub presets: &'static [&'static str],
+}
+
+pub const BUNDLES: [Bundle; 3] = [
+    Bundle { id: "tablet", ru: "Планшет", en: "Tablet", presets: &["snip", "paste", "voice", "tasks", "keyboard"] },
+    Bundle { id: "drawing", ru: "Рисование", en: "Drawing", presets: &["undo", "redo", "holdshift", "holdctrl", "holdspace", "snip"] },
+    Bundle { id: "text", ru: "Текст", en: "Text", presets: &["copy", "paste", "undo", "selectall", "voice"] },
+];
+
+/// Whether two actions do the same: the same keys however they are written (a held `control` is a
+/// held `ctrl`), or the same target.
+fn same_action(a: &Action, b: &Action) -> bool {
+    let keys = |k: &str| crate::keys::parse(k).ok().map(|mut vk| { vk.sort(); vk });
+    match (a, b) {
+        (Action::Hotkey(x), Action::Hotkey(y)) => keys(x).is_some() && keys(x) == keys(y),
+        (Action::Hold(x), Action::Hold(y)) => crate::keys::holdable(x).is_some() && crate::keys::holdable(x) == crate::keys::holdable(y),
+        (Action::Open(x), Action::Open(y)) => x.trim().to_lowercase() == y.trim().to_lowercase(),
+        _ => false,
+    }
+}
+
+/// The items a ready set adds to the end of `existing`, named in Russian or in English, each for
+/// the program `only_in` names if one does. An action the list already has for the same program,
+/// or for all programs when none is named, is not added again; the existing items stay as they are.
+pub fn bundle_items(bundle: &Bundle, russian: bool, only_in: Option<&str>, existing: &[Value]) -> Vec<Value> {
+    let only_in = only_in.map(str::trim).filter(|p| !p.is_empty());
+    let mut have: Vec<Item> = existing.iter().filter_map(|v| parse_item(v).ok()).collect();
+    let mut added = Vec::new();
+    for preset in bundle.presets.iter().filter_map(|id| PRESETS.iter().find(|p| p.id == *id)) {
+        let mut raw = preset_item(preset, russian);
+        if let Some(program) = only_in {
+            raw["only_in"] = json!(program);
+        }
+        let Ok(item) = parse_item(&raw) else { continue };
+        if have.iter().any(|h| same_action(&h.action, &item.action) && h.only_in == item.only_in) {
+            continue;
+        }
+        have.push(item);
+        added.push(raw);
+    }
+    added
 }
 
 /// The file written on first run: ready actions of Windows only, named in the system's language.
@@ -242,12 +331,18 @@ pub fn parse_item(v: &Value) -> Result<Item, String> {
             crate::keys::parse(&keys)?;
             Action::Hotkey(keys)
         }
+        Some("hold") => {
+            let keys = text_field(v, "keys").ok_or("empty keys")?.to_lowercase();
+            crate::keys::holdable(&keys).ok_or(format!("cannot hold \"{keys}\": only shift, ctrl, alt or space"))?;
+            Action::Hold(keys)
+        }
         Some(other) => return Err(format!("unknown action \"{other}\"")),
         None => return Err("no action".into()),
     };
     // A `lit` without both parts is left out rather than failing the item
     let lit = v.get("lit").and_then(|l| Some((text_field(l, "program")?.to_lowercase(), text_field(l, "window")?)));
-    Ok(Item { name, icon: text_field(v, "icon"), hint: text_field(v, "hint"), lit, action })
+    let only_in = text_field(v, "only_in").map(|p| p.to_lowercase());
+    Ok(Item { name, icon: text_field(v, "icon"), hint: text_field(v, "hint"), lit, only_in, action })
 }
 
 /// Parses the settings text. `Err` means the whole file is invalid (not JSON, or no `items`).
@@ -285,6 +380,7 @@ pub fn parse(text: &str) -> Result<(Settings, Vec<String>), String> {
         },
         updates: v.get("updates").and_then(Value::as_bool).unwrap_or(true),
         tablet_only: v.get("tablet_only").and_then(Value::as_bool).unwrap_or(false),
+        click_sound: v.get("click_sound").and_then(Value::as_bool).unwrap_or(false),
         items: good,
     };
     Ok((settings, skipped))
@@ -441,6 +537,26 @@ mod tests {
     }
 
     #[test]
+    fn the_tap_sound_is_off_unless_the_file_asks_for_it() {
+        // A file from before the switch existed, the default file, and anything that is not a switch
+        assert!(!parse(r#"{"items":[]}"#).unwrap().0.click_sound);
+        assert!(!parse(&default_text(true)).unwrap().0.click_sound);
+        assert!(!Settings::empty().click_sound);
+        assert!(!parse(r#"{"click_sound":"yes","items":[]}"#).unwrap().0.click_sound);
+        assert!(parse(r#"{"click_sound":true,"items":[]}"#).unwrap().0.click_sound);
+        // The settings window turns it on: one field before the items, the rest of the file kept
+        let out = with_field(OWN, "click_sound", json!(true)).unwrap();
+        assert!(out.contains("  \"note\": \"mine\",
+  \"click_sound\": true,
+  \"items\": ["), "{out}");
+        assert!(out.contains(r#""lit": { "program": "recorder.exe", "window": "Recording" }"#));
+        assert!(parse(&out).unwrap().0.click_sound);
+        let off = with_field(&out, "click_sound", json!(false)).unwrap();
+        assert_eq!(off, out.replace("\"click_sound\": true", "\"click_sound\": false"));
+        assert!(!parse(&off).unwrap().0.click_sound);
+    }
+
+    #[test]
     fn an_imported_icon_never_replaces_another_picture() {
         let dir = std::env::temp_dir().join(format!("tapka-icons-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -506,6 +622,81 @@ mod tests {
     }
 
     #[test]
+    fn the_settings_pages_are_named_in_both_languages_and_open_settings() {
+        assert_eq!(PAGES.len(), 10);
+        for russian in [true, false] {
+            for page in &PAGES {
+                let item = parse_item(&page_item(page, russian)).unwrap_or_else(|why| panic!("{}: {why}", page.0));
+                assert!(!item.name.trim().is_empty(), "{}", page.0);
+                assert_eq!(item.icon.as_deref(), Some("gear"));
+                assert!(crate::glyphs::builtin("gear").is_some());
+                assert!(matches!(&item.action, Action::Open(t) if t.starts_with("ms-settings:") && t.len() > "ms-settings:".len()), "{}", page.0);
+            }
+        }
+        assert_eq!(page_item(&PAGES[2], true)["name"], "Звук");
+        assert_eq!(page_item(&PAGES[2], false)["name"], "Sound");
+        // No page twice
+        let mut targets: Vec<_> = PAGES.iter().map(|p| p.0).collect();
+        targets.sort();
+        targets.dedup();
+        assert_eq!(targets.len(), PAGES.len());
+    }
+
+    #[test]
+    fn a_ready_set_adds_valid_items_once_and_keeps_the_rest() {
+        let names = |items: &[Value]| -> Vec<String> { items.iter().map(|i| i["name"].as_str().unwrap().to_string()).collect() };
+        // Every set is made of ready actions only, and each of them makes a valid item
+        for bundle in &BUNDLES {
+            assert!(!bundle.ru.is_empty() && !bundle.en.is_empty());
+            for russian in [true, false] {
+                let items = bundle_items(bundle, russian, None, &[]);
+                assert_eq!(items.len(), bundle.presets.len(), "{}", bundle.id);
+                for item in &items {
+                    let item = parse_item(item).unwrap();
+                    assert!(crate::glyphs::builtin(item.icon.as_deref().unwrap()).is_some());
+                }
+            }
+        }
+        let drawing = BUNDLES.iter().find(|b| b.id == "drawing").unwrap();
+        assert_eq!(
+            names(&bundle_items(drawing, true, None, &[])),
+            ["Отменить", "Повторить", "Держать Shift", "Держать Ctrl", "Держать Space", "Снимок"]
+        );
+        let text = BUNDLES.iter().find(|b| b.id == "text").unwrap();
+        assert_eq!(names(&bundle_items(text, false, None, &[])), ["Copy", "Paste", "Undo", "Select all", "Voice typing"]);
+        // For one program: every item says so, and the file reads it back
+        let for_paint = bundle_items(text, true, Some("paint.exe"), &[]);
+        assert!(for_paint.iter().all(|i| parse_item(i).unwrap().only_in.as_deref() == Some("paint.exe")));
+        // What the list already has for the same program is not added twice, however it is written;
+        // the same action for another program, or for all programs, does not count
+        let existing = vec![
+            json!({ "name": "Мой вставить", "action": "hotkey", "keys": "Ctrl+V", "only_in": "Paint.exe" }),
+            json!({ "name": "Копия", "action": "hotkey", "keys": "ctrl+c" }),
+            json!({ "name": "Отмена", "action": "hotkey", "keys": "ctrl+z", "only_in": "sketch.exe" }),
+            json!({ "name": "Потом", "action": "script" }),
+        ];
+        assert_eq!(names(&bundle_items(text, true, Some("paint.exe"), &existing)), ["Копировать", "Отменить", "Выделить всё", "Голосовой ввод"]);
+        assert_eq!(names(&bundle_items(text, true, None, &existing)), ["Вставить", "Отменить", "Выделить всё", "Голосовой ввод"]);
+        // Added once, the set adds nothing the second time
+        let once: Vec<Value> = existing.iter().cloned().chain(bundle_items(text, true, Some("paint.exe"), &existing)).collect();
+        assert!(bundle_items(text, true, Some("paint.exe"), &once).is_empty());
+        // The held keys count as their own kind: a Shift shortcut is not a held Shift
+        let shift = vec![json!({ "name": "s", "action": "hotkey", "keys": "shift" })];
+        assert_eq!(bundle_items(drawing, false, None, &shift).len(), 6);
+        let held = vec![json!({ "name": "s", "action": "hold", "keys": "Shift" })];
+        assert_eq!(bundle_items(drawing, false, None, &held).len(), 5);
+        // Held Ctrl written as the file may have it
+        let control = vec![json!({ "name": "c", "action": "hold", "keys": "Control" })];
+        assert_eq!(names(&bundle_items(drawing, false, None, &control)), ["Undo", "Redo", "Hold Shift", "Hold Space", "Snip"]);
+        // The new items go after the existing ones in the file and survive a save
+        let saved = with_field(OWN, "items", json!(once)).unwrap();
+        let (s, skipped) = parse(&saved).unwrap();
+        assert_eq!((s.items.len(), skipped.len()), (7, 1));
+        assert_eq!(s.items[3].name, "Копировать");
+        assert_eq!(s.items[3].only_in.as_deref(), Some("paint.exe"));
+    }
+
+    #[test]
     fn the_sound_and_input_actions_survive_the_settings_file() {
         let ids = ["clipboard", "emoji", "volumeup", "volumedown", "mute", "playpause", "nexttrack"];
         let presets: Vec<_> = ids.iter().map(|id| PRESETS.iter().find(|p| p.id == *id).unwrap()).collect();
@@ -535,6 +726,60 @@ mod tests {
         assert_eq!(s.items[0].action, Action::Hotkey("win+shift+s".into()));
         assert_eq!(s.items[4].action, Action::Open("ms-settings:".into()));
         // Nothing of any one machine or of another product
-        assert!(s.items.iter().all(|i| i.lit.is_none()));
+        assert!(s.items.iter().all(|i| i.lit.is_none() && i.only_in.is_none()));
+    }
+
+    #[test]
+    fn an_item_for_one_program_comes_from_the_file_and_survives_a_save() {
+        let text = OWN.replace(
+            r#"{ "name": "Later""#,
+            r#"{ "name": "Brush", "action": "hotkey", "keys": "b", "only_in": "Paint.exe" },
+    { "name": "Later""#,
+        );
+        let (s, skipped) = parse(&text).unwrap();
+        assert_eq!(skipped.len(), 1, "{skipped:?}");
+        assert_eq!(s.items[0].only_in, None);
+        assert_eq!(s.items[1].only_in.as_deref(), Some("paint.exe"));
+        // An empty or odd value shows the item everywhere
+        for odd in [r#""""#, r#""  ""#, "5", "null"] {
+            let item = parse_item(&serde_json::from_str(&format!(r#"{{ "name": "a", "action": "hotkey", "keys": "b", "only_in": {odd} }}"#)).unwrap()).unwrap();
+            assert_eq!(item.only_in, None, "{odd}");
+        }
+        // The editor hands the items back as the file has them: the field stays, written as it was
+        let items = serde_json::from_str::<Value>(&text).unwrap()["items"].clone();
+        let saved = with_field(&text, "items", items).unwrap();
+        assert_eq!(saved, text);
+        assert!(saved.contains(r#""only_in": "Paint.exe""#));
+    }
+
+    #[test]
+    fn a_held_key_comes_from_the_file_and_the_editor_writes_it_back() {
+        let text = OWN.replace(
+            r#"{ "name": "Later""#,
+            r#"{ "name": "Shift", "icon": "shift", "action": "hold", "keys": "Shift", "only_in": "sketch.exe" },
+    { "name": "Later""#,
+        );
+        let (s, skipped) = parse(&text).unwrap();
+        assert_eq!(skipped.len(), 1, "{skipped:?}");
+        assert_eq!(s.items[1].action, Action::Hold("shift".into()));
+        assert_eq!(s.items[1].only_in.as_deref(), Some("sketch.exe"));
+        // Only the three modifiers and Space are held; nothing else makes an item
+        for bad in ["win", "ctrl+shift", "a", ""] {
+            let item = serde_json::from_str(&format!(r#"{{ "name": "a", "action": "hold", "keys": "{bad}" }}"#)).unwrap();
+            assert!(parse_item(&item).is_err(), "{bad}");
+        }
+        // The editor adds the four ready ones as the file has them, and the file reads back the same
+        let held: Vec<Value> = ["holdshift", "holdctrl", "holdalt", "holdspace"]
+            .iter()
+            .map(|id| preset_item(PRESETS.iter().find(|p| p.id == *id).unwrap(), false))
+            .collect();
+        assert_eq!(inline(&held[0]), r#"{ "name": "Hold Shift", "icon": "shift", "hint": "Until tapped again; lets go by itself after 20 s without taps", "action": "hold", "keys": "shift" }"#);
+        let saved = with_field(&text, "items", json!(held)).unwrap();
+        let keys: Vec<Action> = parse(&saved).unwrap().0.items.into_iter().map(|i| i.action).collect();
+        assert_eq!(keys, ["shift", "ctrl", "alt", "space"].map(|k| Action::Hold(k.into())));
+        assert_eq!(to_text(&serde_json::from_str(&saved).unwrap()), saved);
+        // The hint says what the panel does
+        assert!(HOLD_HINT.1.contains(&format!("{} s", crate::actions::HOLD_IDLE_MS / 1000)));
+        assert!(HOLD_HINT.0.contains(&format!("{} с", crate::actions::HOLD_IDLE_MS / 1000)));
     }
 }

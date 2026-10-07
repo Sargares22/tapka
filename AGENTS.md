@@ -26,6 +26,7 @@ settings file. What it does for the user is in `README.md`; this file is the map
 - `sh scripts/check.sh` — every automated check. Run it before you say you are done.
 - `sh scripts/preview.sh` — build and start on a throwaway data folder (a first run).
 - `node scripts/shot.mjs` — pictures of both pages in `target/shots`, no Windows calls.
+- `powershell -File scripts/windows-of.ps1` — the running panel's windows, their styles, and whether the taskbar shows a button for it (should be none).
 - `sh scripts/make-release.sh` — installers; needs the project's update key, so not for you.
 
 Skills with step-by-step recipes are in `.agents/skills` (Claude Code: `.claude/skills`).

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0 (2026-10-07)
+
+- Keys for one program: an item with `only_in` (a program's file name like `paint.exe`, or its Store package family) is on the capsule only while that program's window is active, right after the first two keys for all programs. The first time in a start a program brings its keys, the capsule says so once ("Keys for …"). The editor sets it in *Where to show*.
+- Keys held for the pen: an item with `"action": "hold"` and `"keys"` set to `shift`, `ctrl`, `alt` or `space` keeps that key down until the next tap on it and glows meanwhile. It lets go by itself after 20 seconds without a tap on the capsule, when another program comes to the front, when the capsule hides, and when Tapka quits. Four new ready-made Windows actions add them: Hold Shift, Hold Ctrl, Hold Alt, Hold Space, each with its own icon.
+- One *Add* for everything, with five kinds: *Program* (the programs pinned to your taskbar on top, then the whole Start menu), *Windows action* (the ready-made actions and ten Windows Settings pages: Bluetooth, Wi-Fi, sound, display, night light, battery, notifications, printers, Windows Update, pen), *Website or file*, *Keyboard shortcut* and *Ready set* (Tablet, Drawing, Text: several keys at once, for every program or for one; keys already in the list are not added again).
+- New ready-made Windows actions: Redo (Ctrl+Y) and Select all (Ctrl+A).
+- The settings window, redone: cards stand out from the page by shade, not lines; each item reads in words (*Program*, *Website*, *Shortcut Ctrl+V*, *Settings: Bluetooth*) instead of its path or address, and an item without a picture shows a sign of its kind instead of a letter. A tap on a row opens the item's card, where it is also removed; the path and the shortcut are under *Details*, the built-in icons under *Change…*. *Look* shows the themes and the capsule as pictures; the accent palette is the blue range of Windows 11, `#8ab4ff` still first, and buttons darken it until their white letters read. *Quit* is left to the tray; the settings file and the log are under *Advanced*.
+- Feedback on a tap: the key dips and flashes faintly in the accent for a moment. A quiet click can be added with *Sound on tap* (Settings → Look, `click_sound` in the file); it is off by default.
+- Tapka's windows no longer show on the taskbar, the settings window included: the tray item *Settings…* or the *+* key brings it back to the front, restored if minimized.
+
 ## 1.1.0
 
 - New ready-made Windows actions: louder, quieter, mute, play/pause, next track, clipboard history (Win+V) and emoji (Win+.), each with its own icon.

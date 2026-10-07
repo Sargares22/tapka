@@ -15,15 +15,16 @@ const browser = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'].find(existsSync);
 
 // Returns a page's DOM after its scripts have run for `ms` of virtual time. The page is given a
-// stand-in for Tauri whose `get_view` answers with window.__view and `get_settings` with
-// window.__settings; every call is kept in window.__calls and the page's event listeners in
-// window.__on, by event name.
+// stand-in for Tauri whose `get_view` answers with window.__view, `get_settings` with
+// window.__settings, `running_programs` with window.__programs, `pinned_apps` with window.__pinned
+// and `bundle_items` with what window.__bundle makes of its arguments; every call is kept in
+// window.__calls and the page's event listeners in window.__on, by event name.
 // `script` runs after the page's own script and may leave its findings in the DOM.
 function renderedDom(items, script = '', ms = 4000, page = 'index.html', settings = null) {
   assert.ok(browser, 'Google Chrome not found');
   const work = mkdtempSync(join(tmpdir(), 'tapka-check-'));
   try {
-    const stub = `<script>window.__calls=[];window.__on={};window.__view={items:${JSON.stringify(items)},cell:54,tablet:false,edge:'right',theme:'dark',accent:'#8ab4ff',add:['Добавить','Открыть редактор пунктов']};window.__settings=${JSON.stringify(settings)};window.__TAURI__={core:{invoke:async(c,a)=>{window.__calls.push([c,a]);return c==='get_view'?window.__view:c==='get_settings'?JSON.parse(JSON.stringify(window.__settings)):null}},event:{listen(n,cb){window.__on[n]=cb}}}</script>`;
+    const stub = `<script>window.__calls=[];window.__on={};window.__view={items:${JSON.stringify(items)},cell:54,tablet:false,edge:'right',theme:'dark',accent:'#8ab4ff',add:['Добавить','Открыть редактор пунктов']};window.__settings=${JSON.stringify(settings)};window.__programs=[{name:'Paint Studio',exe:'paint.exe'},{name:'Sketch',exe:'sketch.exe'}];window.__TAURI__={core:{invoke:async(c,a)=>{window.__calls.push([c,a]);return c==='get_view'?window.__view:c==='get_settings'?JSON.parse(JSON.stringify(window.__settings)):c==='running_programs'?window.__programs:c==='pinned_apps'?window.__pinned:c==='bundle_items'?window.__bundle?.(a):null}},event:{listen(n,cb){window.__on[n]=cb}}}</script>`;
     const html = readFileSync(join(root, 'ui', page), 'utf8')
       .replace('<head>', '<head>' + stub)
       .replace('</body>', `<script>${script}</script></body>`);
@@ -39,12 +40,13 @@ function renderedDom(items, script = '', ms = 4000, page = 'index.html', setting
 }
 
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+// `at` is an item's place in the settings file, which Rust sends with each item it shows
 const items = [
-  { name: 'Снимок', hint: 'Выделить область экрана', icon: null },
-  { name: 'диктовка', icon: null },
-  { name: 'Сайт', icon: PNG },
-  { name: 'Calc', icon: null },
-  { name: 'Вставить', icon: null, glyph: '<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M4 4h16"/></svg>' },
+  { at: 0, name: 'Снимок', hint: 'Выделить область экрана', icon: null },
+  { at: 1, name: 'диктовка', icon: null },
+  { at: 2, name: 'Сайт', icon: PNG },
+  { at: 3, name: 'Calc', icon: null },
+  { at: 4, name: 'Вставить', icon: null, glyph: '<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M4 4h16"/></svg>' },
 ];
 
 // Presses, releases and hovers on the items; after each step notes what the name card shows
@@ -112,7 +114,7 @@ const gestures = `(async () => {
   const lit = () => [...document.querySelectorAll('.item')].map(el => el.classList.contains('live'));
   window.__on.marks({ payload: [[false, false], [true, true], [false, false], [true, false], [false, false]] }); out.marked = marks(); out.live = lit();
   window.__on.marks({ payload: [[false, false], [false, false], [false, false], [true, false], [false, false]] }); out.unmarked = marks(); out.unlive = lit();
-  // The last key is not an item: a tap on it asks for the editor by the index after the items
+  // The last key is not an item: a tap on it asks for the editor, with no index
   const all = document.querySelectorAll('.item'), plus = all[all.length - 1];
   out.plusLast = plus.classList.contains('add') && all.length === 6;
   fire(plus, 'pointerdown', 'touch'); fire(plus, 'pointerup', 'touch');
@@ -212,7 +214,7 @@ test('a built-in icon is drawn inline, in the ink of the theme', () => {
 test('the last key is the plus: it opens the editor and is not one of the items', () => {
   assert.equal((dom.match(/<button class="item add"/g) || []).length, 1);
   assert.equal(seen.plusLast, true);
-  assert.equal(seen.plusTap, items.length);
+  assert.equal(seen.plusTap, null);
   assert.equal(seen.plusLabel, 'Добавить');
 });
 
@@ -221,6 +223,242 @@ test('the capsule takes its theme and accent from the settings', () => {
   assert.equal(seen.themeAfter, 'light');
   assert.equal(seen.accentAfter, '#ff8800');
   assert.equal(seen.pillLight, 'rgb(238, 240, 244)');
+});
+
+// ---------- keys for one program
+// Which items show for the active program is decided in Rust (`actions::shown_items`, tested
+// there); the page is handed the items to show, in Rust's order: the first two for all programs,
+// the program's, the rest. Here: the file has four items for all programs and two for paint.exe,
+// and paint.exe comes to the front, then goes.
+const everywhere = [0, 1, 3, 4].map(at => ({ at, name: 'Всем ' + at, icon: null }));
+const paint = [2, 5].map(at => ({ at, name: 'Paint ' + at, icon: null }));
+const switching = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  const list = document.getElementById('list');
+  const names = () => [...document.querySelectorAll('#list .item')].map(b => b.textContent);
+  const card = () => { const c = document.getElementById('card'); return c.hidden ? null : c.querySelector('.c-title').textContent; };
+  const fire = (el, type) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: 10, clientY: 10 }));
+  // As short as the real window makes a capsule of four keys and more: the list scrolls
+  document.getElementById('pill').style.height = '260px';
+  await sleep(50);
+  out.before = names();
+  list.scrollTop = 40; out.scrolledTo = list.scrollTop;
+  const firstKeys = [...list.children].slice(0, 2).map(b => b.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop);
+  // The program comes to the front for the first time: its keys after the others, and a note
+  window.__view = { ...window.__view, items: ${JSON.stringify([...everywhere.slice(0, 2), ...paint, ...everywhere.slice(2)])} };
+  window.__on.set({ payload: 'Клавиши для Paint Studio' }); await sleep(30);
+  out.during = names();
+  out.appearing = [...list.children].map(b => b.getAnimations({ subtree: true }).length > 0);
+  out.longest = Math.max(...[...list.children].flatMap(b => b.getAnimations({ subtree: true })).map(a => a.effect.getTiming().duration));
+  out.note = card();
+  const box = document.getElementById('card').getBoundingClientRect();
+  out.noteInside = box.top >= 0 && box.bottom <= innerHeight && box.right <= list.getBoundingClientRect().left;
+  out.noteRegion = window.__calls.filter(c => c[0] === 'card').pop()[1].open;
+  out.sameFirstKeys = [...list.children].slice(0, 2).every((b, i) => Math.abs(b.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - firstKeys[i]) < 0.5);
+  await sleep(1000); out.scrollAfter = list.scrollTop; out.noteAt1s = card();
+  await sleep(1200); out.noteAt2s = card();
+  // A tap on a key of the program reports its place in the file
+  const third = list.children[2];
+  fire(third, 'pointerdown'); fire(third, 'pointerup');
+  out.tapAt = window.__calls.filter(c => c[0] === 'tap').pop()[1].index;
+  // The program goes: its keys go, no note; the program comes back: no note a second time
+  window.__view = { ...window.__view, items: ${JSON.stringify(everywhere)} };
+  window.__on.set({ payload: null }); await sleep(30);
+  out.after = names(); out.noteAfter = card();
+  // The program comes to the front while a finger holds the plus: nothing is redrawn under it, the
+  // held key keeps its label, the release still opens the editor, and then the keys change
+  const plus = () => document.querySelector('.item.add');
+  plus().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 2, pointerType: 'touch', clientX: 10, clientY: 10 }));
+  await sleep(450); out.heldLabel = card();
+  window.__view = { ...window.__view, items: ${JSON.stringify([...everywhere.slice(0, 2), ...paint, ...everywhere.slice(2)])} };
+  window.__on.set({ payload: 'Клавиши для Paint Studio' }); await sleep(30);
+  out.whileHeld = names(); out.heldLabelAfter = card();
+  window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 2, pointerType: 'touch', clientX: 10, clientY: 10 }));
+  await sleep(30);
+  out.releasedOn = window.__calls.filter(c => c[0] === 'tap').length;
+  const short = document.querySelector('.item.add');
+  short.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 3, pointerType: 'touch', clientX: 10, clientY: 10 }));
+  window.__view = { ...window.__view, items: ${JSON.stringify(everywhere)} };
+  window.__on.set({ payload: null }); await sleep(30);
+  out.shortHeld = names();
+  window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 3, pointerType: 'touch', clientX: 10, clientY: 10 }));
+  await sleep(30);
+  out.shortTap = window.__calls.filter(c => c[0] === 'tap').pop()[1].index;
+  out.afterRelease = names();
+  // The program comes to the front and a finger lands on a key while Rust is still answering:
+  // the answer waits for the release, and the release taps the key under the finger, not the
+  // program's key drawn in its place since
+  window.__view = { ...window.__view, items: ${JSON.stringify([...everywhere.slice(0, 2), ...paint, ...everywhere.slice(2)])} };
+  window.__on.set({ payload: null });
+  const third2 = list.children[2];
+  third2.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 4, pointerType: 'pen', clientX: 10, clientY: 10 }));
+  await sleep(30);
+  out.racedHeld = names();
+  window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 4, pointerType: 'pen', clientX: 10, clientY: 10 }));
+  await sleep(30);
+  out.racedTap = window.__calls.filter(c => c[0] === 'tap').pop()[1].index;
+  out.racedAfter = names();
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const sw = found(renderedDom(everywhere, switching, 4000));
+
+test('story 26: keys for the active program come after the first two, softly, with a note once', () => {
+  assert.deepEqual(sw.before, ['В', 'В', 'В', 'В']);
+  assert.ok(sw.scrolledTo > 0, 'the list could not be scrolled');
+  // Two keys for all programs, the two for the program, the other two for all programs
+  assert.equal(sw.during.length, 6);
+  assert.deepEqual(sw.during, ['В', 'В', 'P', 'P', 'В', 'В']);
+  assert.equal(sw.sameFirstKeys, true);
+  // Only the new keys come in with an animation, and it is over in under 200 ms
+  assert.deepEqual(sw.appearing, [false, false, true, true, false, false]);
+  assert.ok(sw.longest > 0 && sw.longest <= 200, String(sw.longest));
+  // The list goes back to its start
+  assert.equal(sw.scrollAfter, 0);
+  // The note shows beside the capsule, through the window's region, for two seconds
+  assert.equal(sw.note, 'Клавиши для Paint Studio');
+  assert.equal(sw.noteInside, true);
+  assert.equal(sw.noteRegion, true);
+  assert.equal(sw.noteAt1s, 'Клавиши для Paint Studio');
+  assert.equal(sw.noteAt2s, null);
+  assert.equal(sw.tapAt, 2);
+  assert.equal(sw.after.length, 4);
+  assert.equal(sw.noteAfter, null);
+});
+
+test('story 26: the keys do not change under a held finger; the release taps the key it was on', () => {
+  // A long press on the plus: its label stays, the keys wait for the release
+  assert.equal(sw.heldLabel, 'Добавить');
+  assert.equal(sw.whileHeld.length, 4);
+  assert.equal(sw.heldLabelAfter, 'Добавить');
+  // A short press on the plus while the program leaves: the plus is tapped, then the keys change
+  assert.deepEqual(sw.shortHeld, ['В', 'В', 'P', 'P', 'В', 'В']);
+  assert.equal(sw.shortTap, null);
+  assert.equal(sw.afterRelease.length, 4);
+  // A press that lands while the new set is on its way: nothing changes under the pen, the
+  // release taps the key it was on (the third key for all programs, at 3 in the file), then the
+  // new set is drawn
+  assert.deepEqual(sw.racedHeld, ['В', 'В', 'В', 'В']);
+  assert.equal(sw.racedTap, 3);
+  assert.deepEqual(sw.racedAfter, ['В', 'В', 'P', 'P', 'В', 'В']);
+});
+
+// ---------- keys held for the pen
+// Rust keeps the key down and says which items hold theirs (`held`); here the stand-in for Rust
+// answers a tap on a `hold` item the way Rust does. Item 1 holds Shift, item 3 Ctrl.
+const holding = [
+  { at: 0, name: 'Снимок', icon: null },
+  { at: 1, name: 'Держать Shift', icon: null },
+  { at: 2, name: 'Вставить', icon: null },
+  { at: 3, name: 'Держать Ctrl', icon: null, held: true },
+];
+const holdScript = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  const down = new Set([3]);
+  const real = window.__TAURI__.core.invoke;
+  window.__TAURI__.core.invoke = async (c, a) => {
+    if (c === 'tap' && (a.index === 1 || a.index === 3)) {
+      down.has(a.index) ? down.delete(a.index) : down.add(a.index);
+      window.__on.held({ payload: [...down] });
+    }
+    return real(c, a);
+  };
+  const lit = () => [...document.querySelectorAll('#list .item')].map(b => b.classList.contains('held'));
+  const tap = b => { for (const type of ['pointerdown', 'pointerup']) b.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'pen', clientX: 10, clientY: 10 })); };
+  await sleep(50);
+  const keys = () => document.querySelectorAll('#list .item');
+  out.start = lit();
+  tap(keys()[1]); await sleep(30); out.afterTap = lit();
+  // Lit exactly as an item whose watched window is showing, once the tap's flash is over
+  const look = b => { b.querySelector('.key').getAnimations().forEach(a => a.finish()); const k = getComputedStyle(b.querySelector('.key')); return [k.backgroundColor, k.boxShadow]; };
+  keys()[0].classList.add('live'); await sleep(300);
+  out.looks = [look(keys()[1]), look(keys()[0])];
+  out.sameAsLive = JSON.stringify(look(keys()[1])) === JSON.stringify(look(keys()[0]));
+  keys()[0].classList.remove('live');
+  out.unlitLook = JSON.stringify(look(keys()[2])) !== JSON.stringify(look(keys()[1]));
+  // Other keys work as usual meanwhile
+  tap(keys()[2]); await sleep(30);
+  out.pasteTap = window.__calls.filter(c => c[0] === 'tap').pop()[1].index; out.afterPaste = lit();
+  tap(keys()[1]); await sleep(30); out.afterSecondTap = lit();
+  // Rust let go of everything by itself: nothing is lit
+  window.__on.held({ payload: [] }); out.afterLetGo = lit();
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const held = found(renderedDom(holding, holdScript, 3000));
+
+test('story 27: a hold item is lit after a tap and goes out after the second', () => {
+  // A key already held when the capsule is drawn shows lit
+  assert.deepEqual(held.start, [false, false, false, true]);
+  assert.deepEqual(held.afterTap, [false, true, false, true]);
+  assert.equal(held.sameAsLive, true, JSON.stringify(held.looks));
+  assert.equal(held.unlitLook, true);
+  assert.equal(held.pasteTap, 2);
+  assert.deepEqual(held.afterPaste, [false, true, false, true]);
+  assert.deepEqual(held.afterSecondTap, [false, false, false, true]);
+  assert.deepEqual(held.afterLetGo, [false, false, false, false]);
+});
+
+// ---------- feedback on a tap
+// A stand-in for WebAudio notes each tone the page plays: when it starts and stops, in seconds.
+const feedback = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  const tones = [];
+  const param = () => ({ setValueAtTime() {}, exponentialRampToValueAtTime() {} });
+  window.AudioContext = class {
+    constructor() { this.currentTime = 0; this.state = 'running'; this.destination = {}; }
+    createOscillator() { const o = { frequency: param(), connect: n => n, start: t => o.at = t, stop: t => tones.push(t - o.at) }; return o; }
+    createGain() { return { gain: param(), connect: n => n }; }
+  };
+  const fire = (el, type, y = 10) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: 10, clientY: y }));
+  const keys = () => document.querySelectorAll('#list .item');
+  const flashing = () => [...keys()].map(b => b.classList.contains('flash'));
+  const look = () => [...keys()].map(b => { const k = getComputedStyle(b.querySelector('.key')); return [k.backgroundColor, k.boxShadow, k.transform].join(); }).join('|');
+  await sleep(50);
+  out.rest = look();
+  // A tap: the key flashes at once and is back at rest soon after; the sound is off
+  fire(keys()[1], 'pointerdown'); fire(keys()[1], 'pointerup');
+  out.during = flashing();
+  out.duringLook = getComputedStyle(keys()[1].querySelector('.key')).backgroundColor !== getComputedStyle(keys()[0].querySelector('.key')).backgroundColor;
+  await sleep(60); out.at60 = flashing()[1];
+  await sleep(240); out.at300 = flashing(); out.restAfter = look() === out.rest; out.tonesOff = tones.length;
+  // A finger that moves scrolls, and a long press shows the label: no flash either way
+  fire(keys()[2], 'pointerdown');
+  window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: 10, clientY: 40 }));
+  fire(keys()[2], 'pointerup', 40); out.afterScroll = flashing();
+  fire(keys()[2], 'pointerdown'); await sleep(450); fire(keys()[2], 'pointerup'); out.afterLong = flashing();
+  // The sound is switched on: one short tone per tap
+  window.__view = { ...window.__view, click_sound: true }; window.__on.reload(); await sleep(50);
+  fire(keys()[0], 'pointerdown'); fire(keys()[0], 'pointerup');
+  out.tonesOn = tones.slice();
+  // Without WebAudio the tap still works and still flashes
+  delete window.AudioContext;
+  const taps = window.__calls.filter(c => c[0] === 'tap').length;
+  await sleep(300);
+  fire(keys()[3], 'pointerdown'); fire(keys()[3], 'pointerup');
+  out.noAudioTap = window.__calls.filter(c => c[0] === 'tap').length - taps; out.noAudioFlash = flashing()[3];
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const fb = found(renderedDom(items, feedback, 3000));
+
+test('story 28: a tap flashes its key for a moment; a scroll or a long press does not', () => {
+  assert.deepEqual(fb.during, [false, true, false, false, false]);
+  assert.equal(fb.duringLook, true);
+  assert.equal(fb.at60, true);
+  assert.deepEqual(fb.at300, [false, false, false, false, false]);
+  // At rest the capsule looks exactly as before the tap
+  assert.equal(fb.restAfter, true);
+  assert.deepEqual(fb.afterScroll, [false, false, false, false, false]);
+  assert.deepEqual(fb.afterLong, [false, false, false, false, false]);
+});
+
+test('story 28: the click sounds only when switched on, and the page works without WebAudio', () => {
+  assert.equal(fb.tonesOff, 0);
+  assert.equal(fb.tonesOn.length, 1);
+  assert.ok(fb.tonesOn[0] > 0 && fb.tonesOn[0] <= 0.03, String(fb.tonesOn[0]));
+  assert.equal(fb.noAudioTap, 1);
+  assert.equal(fb.noAudioFlash, true);
 });
 
 // ---------- the settings window
@@ -232,6 +470,21 @@ const settings = {
     { raw: { name: 'Заметки', action: 'open', target: 'C:\\Tools\\notes.exe' }, icon: PNG, glyph: null, problem: null },
     { raw: { name: 'Потом', action: 'script' }, icon: null, glyph: null, problem: 'unknown action "script"' },
   ],
+  // Every kind of item without a hint or a picture, as the list must word it
+  kinds: [
+    { raw: { name: 'Программа', action: 'open', target: 'C:\\Program Files\\Tool\\tool.exe' } },
+    { raw: { name: 'Магазин', action: 'open', target: 'shell:AppsFolder\\Vendor.App_abc!App' } },
+    { raw: { name: 'Сайт', action: 'open', target: 'https://www.example.com/feed' } },
+    { raw: { name: 'Папка', action: 'open', target: 'C:\\Users\\me\\Pictures' } },
+    { raw: { name: 'Файл', action: 'open', target: 'C:\\Users\\me\\plan.txt' } },
+    { raw: { name: 'Bluetooth', action: 'open', target: 'ms-settings:bluetooth' } },
+    { raw: { name: 'Параметры', action: 'open', target: 'ms-settings:' } },
+    { raw: { name: 'Чат', action: 'open', target: 'claude://new' } },
+    { raw: { name: 'Вставить', action: 'hotkey', keys: 'ctrl+v' } },
+    { raw: { name: 'Голос', action: 'hotkey', keys: 'win+h' } },
+    { raw: { name: 'Shift', action: 'hold', keys: 'shift' } },
+    { raw: { name: 'Кисть', action: 'hotkey', keys: 'b', only_in: 'paint.exe' }, only: 'Paint Studio' },
+  ].map(i => ({ icon: null, glyph: null, problem: null, only: null, ...i })),
   // What a hand may leave in the file: not an object, a name that is not text
   odd: [
     { raw: null, icon: null, glyph: null, problem: 'no name' },
@@ -240,11 +493,15 @@ const settings = {
     { raw: { name: 'Крив', action: 'open', target: 'x', hint: { toString: 0 } }, icon: null, glyph: null, problem: null },
     { raw: { name: 'Цел', action: 'open', target: 'x' }, icon: null, glyph: null, problem: null },
   ],
-  scale: 1, edge: 'right', theme: 'dark', accent: '#8ab4ff', lang: 'system', russian: true, autostart: false, updates: true, tablet_only: false,
+  scale: 1, edge: 'right', theme: 'dark', accent: '#8ab4ff', lang: 'system', russian: true, autostart: false, updates: true, tablet_only: false, click_sound: false,
   version: '1.0.0', error: null, intro: true,
   presets: [{ id: 'snip', item: { name: 'Снимок', icon: 'snip', hint: 'Выделить область экрана', action: 'hotkey', keys: 'win+shift+s' } },
     { id: 'settings', item: { name: 'Параметры', icon: 'gear', hint: 'Открыть параметры Windows', action: 'open', target: 'ms-settings:' } }],
-  glyphs: { snip: glyph, mic: glyph, gear: glyph, keyboard: glyph, browser: glyph },
+  pages: ['bluetooth', 'network-wifi', 'sound', 'display', 'nightlight', 'batterysaver', 'notifications', 'printers', 'windowsupdate', 'pen']
+    .map(page => ({ item: { name: page === 'bluetooth' ? 'Bluetooth' : page, icon: 'gear', action: 'open', target: 'ms-settings:' + page } })),
+  bundles: [{ id: 'tablet', name: 'Планшет', items: [{ name: 'Снимок', icon: 'snip', action: 'hotkey', keys: 'win+shift+s' }] },
+    { id: 'text', name: 'Текст', items: [{ name: 'Вставить', icon: 'paste', action: 'hotkey', keys: 'ctrl+v' }, { name: 'Голосовой ввод', icon: 'mic', action: 'hotkey', keys: 'win+h' }] }],
+  glyphs: { snip: glyph, mic: glyph, gear: glyph, keyboard: glyph, browser: glyph, folder: glyph },
 };
 const editing = `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -253,114 +510,313 @@ const editing = `(async () => {
   const last = name => calls(name).pop();
   // The stand-in for Rust keeps the file as it was: each step starts from that list again
   const again = async () => { window.__on.reload(); await sleep(20); };
+  const texts = sel => [...document.querySelectorAll(sel)].map(e => e.textContent);
+  const kind = n => { $('add').click(); document.querySelectorAll('#body .row')[n].click(); };
+  const seg = n => document.querySelectorAll('#body .seg button')[n].click();
+  const chip = name => [...document.querySelectorAll('#body .prog')].find(b => b.textContent === name).click();
+  const save = () => document.querySelector('#foot .acc').click();
+  // Contrast of two colours as CSS computes them, by the WCAG formula
+  const lum = c => { const v = c.match(/\\d+/g).slice(0, 3).map(n => n / 255).map(x => x <= .03928 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4); return .2126 * v[0] + .7152 * v[1] + .0722 * v[2]; };
+  const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+  const style = (e, p) => getComputedStyle(e)[p];
   await sleep(50);
   const out = {};
   const rows = () => [...document.querySelectorAll('#items .row')];
-  out.rows = rows().map(r => r.querySelector('.label span').textContent);
-  out.lines = rows().map(r => r.querySelector('.label small').textContent);
+  out.rows = rows().map(r => r.querySelector('.lbl b').textContent);
+  out.lines = rows().map(r => r.querySelector('.lbl small').textContent);
+  // No item shows a letter for a picture: each key holds a drawing or an icon
+  out.keys = rows().map(r => { const k = r.querySelector('.key'); return [!!k.querySelector('svg, img'), k.textContent.trim()]; });
   out.intro = !$('intro').hidden;
-  out.navRu = [...document.querySelectorAll('.nav span')].map(s => s.textContent);
+  $('intro-close').click(); out.introClosed = $('intro').hidden;
+  out.navRu = texts('.nav span');
   out.theme = document.documentElement.dataset.theme;
   out.accent = document.documentElement.style.getPropertyValue('--accent');
+  out.onAccent = document.documentElement.style.getPropertyValue('--on-accent');
+  // Cards stand out from the page, and text reads on them, in both themes
+  const card = $('items'), page = document.body;
+  const measure = () => ({ card: contrast(style(card, 'backgroundColor'), style(page, 'backgroundColor')),
+    dim: contrast(style(card.querySelector('.lbl small'), 'color'), style(card, 'backgroundColor')),
+    fill: contrast(style($('add'), 'backgroundColor'), style($('add'), 'color')),
+    fillOnCard: contrast(style($('add'), 'backgroundColor'), style(card, 'backgroundColor')) });
+  out.darkContrast = measure();
   // Look: a change is shown at once and goes to Rust as one setting
-  $('theme').value = 'light'; $('theme').onchange();
+  document.querySelector('#theme .th[data-v=light]').click();
   out.themeAfter = document.documentElement.dataset.theme; out.themeCall = last('set_pref');
-  document.querySelectorAll('.swatch')[3].click();
-  out.accentAfter = document.documentElement.style.getPropertyValue('--accent'); out.accentCall = last('set_pref');
-  $('scale').children[2].click(); out.scaleCall = last('set_pref');
+  out.lightContrast = measure();
+  document.querySelectorAll('.swatch')[5].click();
+  out.accentCall = last('set_pref'); out.accentLight = measure().fill;
+  out.swatches = document.querySelectorAll('.swatch').length; out.firstSwatch = document.querySelector('.swatch').dataset.v;
+  $('scale').children[2].click(); out.scaleCall = last('set_pref'); out.capsule = $('capsule').style.transform;
   $('edge').children[0].click(); out.edgeCall = last('set_pref');
   $('autostart').click(); out.autostartCall = last('set_pref');
   $('tablet-only').click(); out.tabletOnlyCall = last('set_pref'); out.tabletOnlyOn = $('tablet-only').classList.contains('on');
-  // The add dialog offers four kinds; a Windows action is added by one tap
+  out.soundOff = !$('click-sound').classList.contains('on');
+  $('click-sound').click(); out.soundCall = last('set_pref'); out.soundOn = $('click-sound').classList.contains('on');
+  out.quit = !!$('quit');
+  window.__settings = { ...window.__settings, theme: 'dark' }; await again();
+  // The add dialog offers five kinds; a Windows action is added by one tap
   $('add').click();
-  out.kinds = [...document.querySelectorAll('#body .pick b')].map(b => b.textContent);
-  document.querySelectorAll('#body .pick')[3].click();
-  out.presets = [...document.querySelectorAll('#body .pick b')].map(b => b.textContent);
-  document.querySelectorAll('#body .pick')[1].click();
+  out.kinds = texts('#body .row b');
+  document.querySelectorAll('#body .row')[1].click();
+  out.groups = texts('#body .glabel');
+  out.tiles = texts('#body .tile > span:not(.key)');
+  document.querySelectorAll('#body .tile')[1].click();
   out.added = last('save_items').items.map(i => i.name); out.addedItem = last('save_items').items[4];
   out.closedAfterAdd = !$('shade').classList.contains('on');
   await again();
-  // A site, file or folder: an address and a name
-  $('add').click(); document.querySelectorAll('#body .pick')[1].click();
+  // A page of Windows Settings, from the same tiles
+  kind(1); document.querySelectorAll('#body .tile')[4].click();
+  out.pageItem = last('save_items').items[4];
+  await again();
+  // A program pinned to the taskbar: on top of the program list, read anew each time
+  window.__pinned = [{ name: 'Paint Studio', target: 'C:\\\\Tools\\\\paint.exe' }, { name: 'Notes', target: 'shell:AppsFolder\\\\Vendor.Notes_abc!App' }];
+  kind(0); await sleep(20);
+  out.appTitle = $('title').textContent;
+  out.pinned = texts('#pinned-list .row b');
+  out.appKeys = [...document.querySelectorAll('#body .key')].every(k => k.querySelector('svg, img') && !k.textContent.trim());
+  document.querySelectorAll('#pinned-list .row')[1].click();
+  out.pinnedItem = last('save_items').items[4];
+  await again();
+  window.__pinned = [];
+  kind(0); await sleep(20);
+  out.pinnedNone = document.querySelector('#pinned-list .say').textContent;
+  closeDialog();
+  // A ready set for one program: one choice for every set; Rust says what it adds, the page puts it at the end
+  window.__bundle = a => a.items.some(i => i.keys === 'ctrl+v' && (i.only_in || null) === a.onlyIn) ? []
+    : [{ name: 'Вставить', icon: 'paste', action: 'hotkey', keys: 'ctrl+v', ...(a.onlyIn ? { only_in: a.onlyIn } : {}) }];
+  kind(4); await sleep(20);
+  out.bundleTitle = $('title').textContent;
+  out.bundles = texts('#body .bundle b');
+  out.bundleKeys = document.querySelectorAll('#body .bundle')[1].querySelectorAll('.key').length;
+  out.bundleWhere = document.querySelectorAll('#body .seg').length;
+  out.bundleAccent = document.querySelectorAll('#body .bundle .acc').length;
+  seg(1); out.bundlePrograms = texts('#body .prog'); chip('Paint Studio');
+  // Two quick taps, the second before Rust has answered the first: one set
+  const asked = calls('bundle_items').length, saved = calls('save_items').length;
+  const go = n => document.querySelectorAll('#body .bundle .btn')[n].click();
+  go(1); go(1); go(0); await sleep(20);
+  out.bundleTwice = [calls('bundle_items').length - asked, calls('save_items').length - saved];
+  out.bundleCall = last('bundle_items');
+  out.bundleSaved = last('save_items').items;
+  out.bundleToast = $('toast-text').textContent;
+  out.bundleClosed = !$('shade').classList.contains('on');
+  // Everything of the set already there: nothing is saved and the dialog stays
+  window.__settings = { ...window.__settings, items: [...window.__settings.items, { raw: out.bundleSaved[4], icon: null, glyph: null, problem: null, only: 'Paint Studio' }] };
+  await again();
+  const saves = calls('save_items').length;
+  kind(4); await sleep(20); seg(1); chip('Paint Studio');
+  go(1); await sleep(20);
+  out.bundleAgain = calls('save_items').length - saves;
+  out.bundleAgainToast = $('toast-text').textContent;
+  closeDialog();
+  window.__settings = { ...window.__settings, items: window.__settings.items.slice(0, 4) };
+  await again();
+  // A site, file or folder: a bare address is a site
+  kind(2);
   const inputs = () => [...document.querySelectorAll('#body input[type=text]')];
-  inputs()[0].value = 'https://example.com'; inputs()[1].value = 'Сайт'; document.querySelector('#foot .accent').click();
+  inputs()[0].value = 'example.com'; inputs()[1].value = 'Сайт'; save();
   out.site = last('save_items').items[4];
   await again();
   // A shortcut: put together with the buttons, or pressed on a keyboard
-  $('add').click(); document.querySelectorAll('#body .pick')[2].click();
-  const chips = () => [...document.querySelectorAll('#body .chip')];
-  chips()[0].click(); chips()[3].click();
+  kind(3);
+  const mods = () => [...document.querySelectorAll('#body .field .btn')];
+  mods()[0].click(); mods()[3].click();
   const key = document.querySelector('#body select'); key.value = 'k'; key.onchange();
-  document.querySelector('#foot .accent').click();
+  out.keysShown = texts('#body .does .kc');
+  save();
   out.keysByButtons = last('save_items').items[4];
   await again();
-  $('add').click(); document.querySelectorAll('#body .pick')[2].click();
+  kind(3);
   window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F5', ctrlKey: true, shiftKey: true, bubbles: true }));
-  document.querySelector('#foot .accent').click();
+  save();
   out.keysPressed = last('save_items').items[4].keys;
   await again();
+  // A tap on a row opens its card; the card fits the window without scrolling
+  rows()[2].click();
+  out.cardTitle = $('title').textContent;
+  // Its whole height, scrolled part included, within the 640 of the window less the margins of the shade
+  out.cardHeight = Math.round($('dialog').getBoundingClientRect().height - $('body').clientHeight + $('body').scrollHeight);
+  out.pathHidden = !document.querySelector('#body details').open && inputs()[2].value === 'C:\\\\Tools\\\\notes.exe';
+  // The icon buttons are buttons, folded until asked for
+  out.glyphsFolded = document.querySelectorAll('#body .gl').length === 0;
+  [...document.querySelectorAll('#body .btn')].find(b => b.textContent === 'Сменить…').click();
+  const own = [...document.querySelectorAll('#body .btn')].find(b => b.textContent === 'Свой файл…');
+  out.ownButton = [style(own, 'height'), style(own, 'paddingLeft')];
+  out.glyphCount = document.querySelectorAll('#body .gl > button').length;
+  closeDialog();
   // Editing keeps what the window does not show: the lit rule stays in the item
-  rows()[1].querySelectorAll('.icon-btn')[0].click();
+  rows()[1].click();
   inputs()[0].value = 'Запись'; inputs()[1].value = 'Подсказка';
-  document.querySelector('#foot .accent').click();
+  save();
   out.edited = last('save_items').items[1];
   out.editedOthers = last('save_items').items.map(i => i.name);
   await again();
-  // Removing takes the item out and offers to put it back
-  rows()[0].querySelectorAll('.icon-btn')[1].click();
+  // A broken item says so in words; the parser's words are under Details
+  rows()[3].click();
+  out.brokenCard = [document.querySelector('#body .does .problem').textContent, document.querySelector('#body .why').textContent];
+  closeDialog();
+  // Removing is in the card, takes the item out and offers to put it back
+  rows()[0].click(); document.querySelector('#foot .danger').click();
   out.removed = last('save_items').items.map(i => i.name);
   out.toast = $('toast').classList.contains('on');
   $('toast-undo').click(); out.restored = last('save_items').items.map(i => i.name);
-  // Order: the first item carried below the second
+  // Order: the first item carried below the second; the dots do not open the card
   const grip = rows()[0].querySelector('.grip'), h = rows()[0].offsetHeight;
   grip.setPointerCapture = () => {};
   const at = (type, y) => grip.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 7, pointerType: 'touch', clientX: 20, clientY: y }));
   at('pointerdown', 100); at('pointermove', 100 + h); at('pointerup', 100 + h);
   out.moved = last('save_items').items.map(i => i.name);
+  rows()[0].querySelector('.grip').click();
+  out.gripOpens = $('shade').classList.contains('on');
+  // An item for one program: its line says which, and the card offers the programs with windows
+  window.__settings = { ...window.__settings, items: [...window.__settings.items,
+    { raw: { name: 'Кисть', action: 'hotkey', keys: 'b', only_in: 'Paint.exe', own: 1 }, icon: null, glyph: null, problem: null, only: 'Paint Studio' },
+    { raw: { name: 'Ластик', action: 'hotkey', keys: 'e', only_in: 'old.exe' }, icon: null, glyph: null, problem: null, only: 'old' }] };
+  await again();
+  out.tag = rows()[4].querySelector('.lbl small .tag').textContent;
+  out.tagLine = rows()[4].querySelector('.lbl small').textContent;
+  out.noTag = rows()[0].querySelector('.tag') === null;
+  rows()[4].click(); await sleep(20);
+  out.whereLabel = [...document.querySelectorAll('#body .field > label')].pop().textContent;
+  out.whereSeg = texts('#body .seg button.on');
+  out.wherePrograms = texts('#body .prog'); out.whereOn = texts('#body .prog.on');
+  // Saved untouched, the field stays as the file has it
+  save();
+  out.untouched = last('save_items').items[4];
+  await again();
+  // A program no longer running is still offered, so it is not lost
+  rows()[5].click(); await sleep(20);
+  out.keptPrograms = texts('#body .prog'); out.keptOn = texts('#body .prog.on');
+  closeDialog();
+  // Everywhere: the field goes; one program: the field comes
+  rows()[4].click(); await sleep(20);
+  seg(0); save();
+  out.everywhere = last('save_items').items[4];
+  await again();
+  rows()[2].click(); await sleep(20);
+  seg(1); const before = calls('save_items').length; save(); out.needProgram = [calls('save_items').length - before, $('toast-text').textContent];
+  chip('Sketch'); save();
+  out.chosen = last('save_items').items[2];
+  await again();
+  // Every kind of item in words, with no path, address or file name
+  window.__settings = { ...window.__settings, items: window.__settings.kinds }; await again();
+  out.kindLines = rows().map(r => r.querySelector('.lbl small').textContent);
+  out.kindKeys = rows().map(r => { const k = r.querySelector('.key'); return !!k.querySelector('svg') && !k.textContent.trim(); });
   // English: Rust says the language, the page changes every text
-  window.__settings = { ...window.__settings, russian: false, intro: false, theme: 'light' }; window.__on.reload(); await sleep(50);
-  out.navEn = [...document.querySelectorAll('.nav span')].map(s => s.textContent);
-  out.addEn = $('add').textContent; out.introGone = $('intro').hidden;
-  // A file with odd items: the list is still drawn, and an odd item can be removed
+  window.__settings = { ...window.__settings, items: window.__settings.kinds.slice(0, 0).concat(window.__first), russian: false, intro: false, theme: 'light' }; window.__on.reload(); await sleep(50);
+  out.navEn = texts('.nav span');
+  out.addEn = $('add').textContent; out.linesEn = rows().map(r => r.querySelector('.lbl small').textContent);
+  // A file with odd items: the list is still drawn, and an odd item can be opened and removed
   window.__settings = { ...window.__settings, items: window.__settings.odd }; window.__on.reload(); await sleep(50);
-  out.oddRows = rows().map(r => r.querySelector('.label span').textContent);
-  rows()[0].querySelectorAll('.icon-btn')[0].click(); out.oddEditOpens = $('shade').classList.contains('on');
-  rows()[0].querySelectorAll('.icon-btn')[1].click(); out.oddRemoved = last('save_items').items.length;
+  out.oddRows = rows().map(r => r.querySelector('.lbl b').textContent);
+  rows()[0].click(); out.oddOpens = $('shade').classList.contains('on');
+  document.querySelector('#foot .danger').click(); out.oddRemoved = last('save_items').items.length;
   // Two removals in a hurry, before Rust has answered the first: the second starts from the first
-  rows()[0].querySelectorAll('.icon-btn')[1].click(); out.oddRemovedTwice = last('save_items').items.length;
+  rows()[0].click(); document.querySelector('#foot .danger').click(); out.oddRemovedTwice = last('save_items').items.length;
   document.documentElement.dataset.check = JSON.stringify(out);
 })();`;
-const set = found(renderedDom([], editing, 4000, 'settings.html', settings));
+const set = found(renderedDom([], `window.__first = ${JSON.stringify(settings.items)};` + editing, 5000, 'settings.html', settings));
 
-test('the settings window lists the items of the file, broken ones included', () => {
+test('the settings window lists the items of the file in words, broken ones included', () => {
   assert.deepEqual(set.rows, ['Снимок', 'Диктовка', 'Заметки', 'Потом']);
-  assert.deepEqual(set.lines.slice(0, 3), ['Выделить область', 'Ctrl + Space', 'C:\\Tools\\notes.exe']);
-  assert.match(set.lines[3], /unknown action/);
+  assert.deepEqual(set.lines, ['Выделить область', 'Сочетание Ctrl+Space', 'Программа', 'Пункт не работает: коснитесь, чтобы исправить']);
+  assert.deepEqual(set.keys, [[true, ''], [true, ''], [true, ''], [true, '']]);
   assert.equal(set.intro, true);
+  assert.equal(set.introClosed, true);
+});
+
+test('an item without a hint is told by its kind, never by its path, address or file', () => {
+  assert.deepEqual(set.kindLines, ['Программа', 'Программа', 'Сайт', 'Папка', 'Файл', 'Параметры: Bluetooth', 'Параметры Windows', 'Ссылка',
+    'Сочетание Ctrl+V', 'Действие Windows', 'Держит Shift', 'только в Paint StudioСочетание B']);
+  for (const line of set.kindLines) assert.doesNotMatch(line, /\\|:\/\/|\.exe|ms-settings:/i);
+  // Without a picture of its own an item shows a drawing of its kind, not a letter
+  assert.ok(set.kindKeys.every(Boolean));
+  assert.deepEqual(set.linesEn, ['Выделить область', 'Shortcut Ctrl+Space', 'Program', 'This item does not work: tap to fix it']);
 });
 
 test('theme, accent, size, edge and autostart apply at once and go to Rust one by one', () => {
-  assert.deepEqual([set.theme, set.accent], ['dark', '#8ab4ff']);
+  assert.deepEqual([set.theme, set.accent, set.onAccent], ['dark', '#8ab4ff', '#fff']);
   assert.equal(set.themeAfter, 'light');
   assert.deepEqual(set.themeCall, { key: 'theme', value: 'light' });
-  assert.equal(set.accentAfter, '#ffd166');
-  assert.deepEqual(set.accentCall, { key: 'accent', value: '#ffd166' });
+  assert.deepEqual(set.accentCall, { key: 'accent', value: '#ff9a3c' });
+  assert.equal(set.swatches, 8);
+  assert.equal(set.firstSwatch, '#8ab4ff');
   assert.deepEqual(set.scaleCall, { key: 'scale', value: 1.25 });
+  assert.equal(set.capsule, 'scale(1.25)');
   assert.deepEqual(set.edgeCall, { key: 'edge', value: 'left' });
   assert.deepEqual(set.autostartCall, { key: 'autostart', value: true });
   assert.deepEqual(set.tabletOnlyCall, { key: 'tablet_only', value: true });
   assert.equal(set.tabletOnlyOn, true);
+  // Story 28: the tap sound is off until switched on
+  assert.equal(set.soundOff, true);
+  assert.deepEqual(set.soundCall, { key: 'click_sound', value: true });
+  assert.equal(set.soundOn, true);
+  // Quit lives in the tray
+  assert.equal(set.quit, false);
 });
 
-test('an item is added in four ways', () => {
-  assert.equal(set.kinds.length, 4);
-  assert.deepEqual(set.presets, ['Снимок', 'Параметры']);
+test('cards stand out from the page and every text and button reads, in both themes', () => {
+  for (const c of [set.darkContrast, set.lightContrast]) {
+    assert.ok(c.card >= 1.3, `card ${c.card}`);
+    assert.ok(c.dim >= 4.5, `dim text ${c.dim}`);
+    assert.ok(c.fill >= 4.5, `button text ${c.fill}`);
+    assert.ok(c.fillOnCard >= 3, `button on card ${c.fillOnCard}`);
+  }
+  // A light orange accent darkens by itself on a button until its white letters read
+  assert.ok(set.accentLight >= 4.5, `orange button ${set.accentLight}`);
+});
+
+test('an item is added in five ways', () => {
+  assert.deepEqual(set.kinds, ['Программа', 'Действие Windows', 'Сайт или файл', 'Сочетание клавиш', 'Готовый набор']);
+  assert.deepEqual(set.groups, ['Частые', 'Окна', 'Страницы Параметров']);
+  assert.deepEqual(set.tiles.slice(0, 3), ['Снимок', 'Параметры', 'Bluetooth']);
+  assert.equal(set.tiles.length, 12);
   assert.deepEqual(set.added, ['Снимок', 'Диктовка', 'Заметки', 'Потом', 'Параметры']);
   assert.deepEqual(set.addedItem, settings.presets[1].item);
   assert.equal(set.closedAfterAdd, true);
+  assert.deepEqual(set.pageItem, { name: 'sound', icon: 'gear', action: 'open', target: 'ms-settings:sound' });
   assert.deepEqual(set.site, { name: 'Сайт', action: 'open', target: 'https://example.com' });
+  assert.deepEqual(set.keysShown, ['Ctrl', 'Win', 'K']);
   assert.deepEqual(set.keysByButtons, { name: 'Ctrl + Win + K', icon: 'keyboard', action: 'hotkey', keys: 'ctrl+win+k' });
   assert.equal(set.keysPressed, 'ctrl+shift+f5');
+});
+
+test('a pinned program is added by one tap from the top of the program list', () => {
+  assert.equal(set.appTitle, 'Программа');
+  assert.deepEqual(set.pinned, ['Paint Studio', 'Notes']);
+  assert.equal(set.appKeys, true);
+  assert.deepEqual(set.pinnedItem, { name: 'Notes', action: 'open', target: 'shell:AppsFolder\\Vendor.Notes_abc!App' });
+  assert.equal(set.pinnedNone, 'Закреплённых не найдено');
+});
+
+test('a ready set goes to the end of the list, for the program chosen, and not twice', () => {
+  assert.equal(set.bundleTitle, 'Готовый набор');
+  assert.deepEqual(set.bundles, ['Планшет', 'Текст']);
+  assert.equal(set.bundleKeys, 2);
+  // One "where" for every set, programs by name, and no set button in the accent
+  assert.equal(set.bundleWhere, 1);
+  assert.equal(set.bundleAccent, 0);
+  assert.deepEqual(set.bundlePrograms, ['Paint Studio', 'Sketch']);
+  assert.deepEqual(set.bundleTwice, [1, 1]);
+  assert.equal(set.bundleCall.id, 'text');
+  assert.equal(set.bundleCall.onlyIn, 'paint.exe');
+  assert.deepEqual(set.bundleCall.items.map(i => i.name), ['Снимок', 'Диктовка', 'Заметки', 'Потом']);
+  assert.deepEqual(set.bundleSaved.map(i => i.name), ['Снимок', 'Диктовка', 'Заметки', 'Потом', 'Вставить']);
+  assert.deepEqual(set.bundleSaved[4], { name: 'Вставить', icon: 'paste', action: 'hotkey', keys: 'ctrl+v', only_in: 'paint.exe' });
+  assert.equal(set.bundleToast, 'Добавлено клавиш: 1');
+  assert.equal(set.bundleClosed, true);
+  assert.equal(set.bundleAgain, 0);
+  assert.equal(set.bundleAgainToast, 'Все клавиши набора уже есть в списке');
+});
+
+test('a tap on an item opens its card, which fits the window with its path folded away', () => {
+  assert.equal(set.cardTitle, 'Изменить');
+  assert.ok(set.cardHeight <= 640 - 36, `card ${set.cardHeight} px`);
+  assert.equal(set.pathHidden, true);
+  assert.equal(set.glyphsFolded, true);
+  assert.deepEqual(set.ownButton, ['34px', '16px']);
+  assert.equal(set.glyphCount, 6);
+  assert.deepEqual(set.brokenCard, ['Пункт не работает', 'unknown action "script"']);
 });
 
 test('an item is edited, removed, restored and moved; fields the window does not show are kept', () => {
@@ -370,18 +826,34 @@ test('an item is edited, removed, restored and moved; fields the window does not
   assert.equal(set.toast, true);
   assert.deepEqual(set.restored, ['Снимок', 'Диктовка', 'Заметки', 'Потом']);
   assert.deepEqual(set.moved, ['Диктовка', 'Снимок', 'Заметки', 'Потом']);
+  assert.equal(set.gripOpens, false);
 });
 
 test('odd items in the file do not break the list', () => {
   assert.deepEqual(set.oddRows, ['—', '—', '—', 'Крив', 'Цел']);
-  assert.equal(set.oddEditOpens, false);
+  assert.equal(set.oddOpens, true);
   assert.equal(set.oddRemoved, 4);
   assert.equal(set.oddRemovedTwice, 3);
+});
+
+test('story 26: the card shows and sets the program an item is for, keeping the rest', () => {
+  assert.equal(set.tag, 'только в Paint Studio');
+  assert.equal(set.tagLine, 'только в Paint StudioСочетание B');
+  assert.equal(set.noTag, true);
+  assert.equal(set.whereLabel, 'Где показывать');
+  assert.deepEqual(set.whereSeg, ['В одной программе']);
+  assert.deepEqual(set.wherePrograms, ['Paint Studio', 'Sketch']);
+  assert.deepEqual(set.whereOn, ['Paint Studio']);
+  assert.deepEqual(set.untouched, { name: 'Кисть', action: 'hotkey', keys: 'b', only_in: 'Paint.exe', own: 1 });
+  assert.deepEqual(set.keptPrograms, ['Paint Studio', 'Sketch', 'old']);
+  assert.deepEqual(set.keptOn, ['old']);
+  assert.deepEqual(set.everywhere, { name: 'Кисть', action: 'hotkey', keys: 'b', own: 1 });
+  assert.deepEqual(set.needProgram, [0, 'Выберите программу']);
+  assert.deepEqual(set.chosen, { name: 'Заметки', action: 'open', target: 'C:\\Tools\\notes.exe', only_in: 'sketch.exe' });
 });
 
 test('the settings window speaks Russian and English', () => {
   assert.deepEqual(set.navRu, ['Пункты', 'Вид', 'Общие', 'О программе']);
   assert.deepEqual(set.navEn, ['Items', 'Look', 'General', 'About']);
   assert.equal(set.addEn, 'Add');
-  assert.equal(set.introGone, true);
 });

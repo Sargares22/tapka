@@ -16,9 +16,9 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_OR};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetCursorPos, GetForegroundWindow, InternalGetWindowText, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
-    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindowAsync,
-    GWL_EXSTYLE, GW_OWNER, WM_NCACTIVATE, WM_NCPAINT, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_MINIMIZE, SW_RESTORE, WS_EX_TOOLWINDOW,
+    EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, InternalGetWindowText, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindowAsync,
+    GWL_EXSTYLE, WS_EX_APPWINDOW, GW_OWNER, WM_NCACTIVATE, WM_NCPAINT, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_MINIMIZE, SW_RESTORE, WS_EX_TOOLWINDOW,
     SM_CONVERTIBLESLATEMODE, SW_HIDE, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
 };
 
@@ -71,6 +71,16 @@ pub fn send_keys(vks: &[u16]) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("SendInput accepted {sent} of {} events", inputs.len()))
+    }
+}
+/// Presses one key and leaves it down, or lets it go: what a `hold` item does, the same way as
+/// `send_keys`.
+pub fn send_key(vk: u16, up: bool) -> Result<(), String> {
+    let sent = unsafe { SendInput(&[key_input(vk, up)], std::mem::size_of::<INPUT>() as i32) };
+    if sent == 1 {
+        Ok(())
+    } else {
+        Err("SendInput refused the key".into())
     }
 }
 /// Hides or shows a window without activating it. `hwnd` is the raw handle.
@@ -126,6 +136,60 @@ pub fn set_region(hwnd: isize, rects: &[(i32, i32, i32, i32)]) {
 pub fn foreground_program() -> Option<String> {
     program_of(unsafe { GetForegroundWindow() }).map(|(exe, _)| exe)
 }
+/// The program of the active window: its file name, lower case, and its Store package family.
+/// `None` when nothing is active, or when it is the desktop, the taskbar or a window of the panel
+/// itself: no program's own items belong there.
+pub fn front_program() -> Option<(String, Option<String>)> {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() {
+        return None;
+    }
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    if pid == unsafe { GetCurrentProcessId() } {
+        return None;
+    }
+    if matches!(class_of(hwnd).as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+        return None;
+    }
+    program_of_process(shown_by(hwnd, pid)?)
+}
+
+fn class_of(hwnd: HWND) -> String {
+    let mut class = [0u16; 64];
+    let len = unsafe { GetClassNameW(hwnd, &mut class) };
+    String::from_utf16_lossy(&class[..len.max(0) as usize])
+}
+
+/// The process whose program a window shows. Store apps such as the calculator are drawn inside a
+/// frame window that belongs to a process of Windows shared by all of them; the app's own window
+/// is a child of the frame, in the app's process. For a frame that holds no app at the moment (a
+/// minimized one) there is no program to name. Any other window shows its own process.
+fn shown_by(hwnd: HWND, pid: u32) -> Option<u32> {
+    if class_of(hwnd) != "ApplicationFrameWindow" {
+        return Some(pid);
+    }
+    struct Find {
+        frame: u32,
+        app: u32,
+    }
+    unsafe extern "system" fn each(child: HWND, lp: LPARAM) -> BOOL {
+        let find = &mut *(lp.0 as *mut Find);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(child, Some(&mut pid));
+        if pid != find.frame {
+            find.app = pid;
+            return BOOL(0);
+        }
+        BOOL(1)
+    }
+    let mut find = Find { frame: pid, app: 0 };
+    unsafe {
+        let _ = EnumChildWindows(Some(hwnd), Some(each), LPARAM(&mut find as *mut Find as isize));
+    }
+    (find.app != 0).then_some(find.app)
+}
+
 /// A window a person would call a program's window: visible, titled, with no owner, not a tool
 /// window and not one Windows keeps cloaked.
 pub struct AppWindow {
@@ -235,6 +299,8 @@ pub fn app_windows() -> Vec<AppWindow> {
         if !plain {
             return BOOL(1);
         }
+        // A Store app's frame stands for the app inside it, and an empty frame for nothing
+        let Some(pid) = shown_by(hwnd, pid) else { return BOOL(1) };
         let key = hwnd.0 as isize;
         if let Some(at) = look.before.iter().position(|k| k.hwnd == key && k.pid == pid && k.alive()) {
             let known = look.before.swap_remove(at);
@@ -299,6 +365,15 @@ pub fn bring_to_front(hwnd: isize) -> Result<(), String> {
 pub fn minimize(hwnd: isize) {
     unsafe {
         let _ = ShowWindowAsync(HWND(hwnd as _), SW_MINIMIZE);
+    }
+}
+
+/// Keeps a window off the taskbar for good: a tool window gets no button, whatever the taskbar
+/// remembers. Call before the window has a region; changing the style drops it.
+pub fn tool_window(hwnd: isize) {
+    unsafe {
+        let ex = GetWindowLongPtrW(HWND(hwnd as _), GWL_EXSTYLE) as u32;
+        SetWindowLongPtrW(HWND(hwnd as _), GWL_EXSTYLE, ((ex & !WS_EX_APPWINDOW.0) | WS_EX_TOOLWINDOW.0) as isize);
     }
 }
 

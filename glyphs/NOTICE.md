@@ -13,6 +13,8 @@
 | paste.svg | Вставить |
 | copy.svg | Копировать |
 | undo.svg | Отменить |
+| redo.svg | Повторить |
+| select-all.svg | Выделить всё |
 | mic.svg | Голосовой ввод, диктовка |
 | tasks.svg | Представление задач |
 | desktop.svg | Показать рабочий стол |
@@ -29,5 +31,9 @@
 | mute.svg | Без звука |
 | playpause.svg | Пауза и продолжение |
 | nexttrack.svg | Следующий трек |
+| shift.svg | Держать Shift |
+| ctrl.svg | Держать Ctrl |
+| alt.svg | Держать Alt |
+| space.svg | Держать Space |
 
 Свой значок: положить PNG или SVG в подпапку `icons` папки данных панели и указать имя файла.

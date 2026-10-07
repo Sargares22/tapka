@@ -65,10 +65,14 @@
   /* The program this item opens is running: a short accent bar on the key's edge side */
   .item{position:relative}
   .item.on::after{content:"";position:absolute;right:1.5px;top:50%;width:3px;height:14px;border-radius:2px;transform:translateY(-50%);background:var(--accent)}
-  /* The window this item watches for is showing (dictation is recording): the key itself is lit */
-  .item.live .key{background:color-mix(in srgb,var(--accent) 24%,var(--key));box-shadow:inset 0 0 0 1.5px var(--accent)}
+  /* The window this item watches for is showing (dictation is recording), or the key this item
+     holds is down (Shift for the pen): the key itself is lit */
+  .item.live .key,.item.held .key{background:color-mix(in srgb,var(--accent) 24%,var(--key));box-shadow:inset 0 0 0 1.5px var(--accent)}
   .item.hot .key{background:var(--key-hot)}
   .item.down .key{transform:scale(.92);background:var(--key-hot)}
+  /* A tap that ran its action: for a moment the key dips as if held and takes a little of the
+     accent, fainter than a lit key */
+  .item.flash .key{transform:scale(.92);background:color-mix(in srgb,var(--accent) 28%,var(--key-hot));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
   .key img{display:block;width:24px;height:24px;object-fit:contain;pointer-events:none}
   .key svg{display:block;width:24px;height:24px;pointer-events:none}
   /* The plus that opens the editor is not a key: a small quiet mark in the foot of the pill, like
@@ -123,9 +127,14 @@
   const grip = document.getElementById('grip');
   const card = document.getElementById('card');
   const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
-  const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8;
+  const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8, NOTE_MS = 2000, APPEAR_MS = 180, FLASH_MS = 140;
   let shown = [];
   let tablet = false;
+  // A quiet click on a tap, if the settings ask for it
+  let sound = false;
+  // The active program changed which items show: the next drawing brings the new keys in softly.
+  // `before` is the items drawn last, by their place in the settings file.
+  let setChange = false, before = [];
   // Docked to the top edge the capsule lies flat: scrolling and the label go the other way
   const flat = () => document.body.dataset.edge === 'top';
 
@@ -141,15 +150,18 @@
   function render(view) {
     hideCard();
     tablet = view.tablet;
+    sound = view.click_sound;
     theme = view.theme;
     paint();
     document.documentElement.style.setProperty('--accent', view.accent);
     document.body.dataset.edge = view.edge;
     list.style.setProperty('--cell', view.cell + 'px');
     shown = [...view.items, { name: view.add[0], hint: view.add[1], glyph: PLUS, add: true }];
+    const fresh = setChange ? view.items.filter(it => !before.includes(it.at)).map(it => it.at) : [];
+    before = view.items.map(it => it.at);
     const made = shown.map((it, i) => {
       const b = document.createElement('button');
-      b.className = 'item' + (it.on ? ' on' : '') + (it.live ? ' live' : '') + (it.add ? ' add' : '');
+      b.className = 'item' + (it.on ? ' on' : '') + (it.live ? ' live' : '') + (it.held ? ' held' : '') + (it.add ? ' add' : '');
       b.dataset.i = i;
       const key = document.createElement('span');
       key.className = 'key';
@@ -171,6 +183,13 @@
     list.replaceChildren(...made);
     keys.replaceChildren(list, add);
     fades();
+    if (setChange) {
+      // The list goes back to its start, where the first keys stand still and the program's keys
+      // follow them, and the keys the program brought fade in where they land
+      setChange = false;
+      list.scrollTo({ top: 0, left: 0, behavior: calm.matches ? 'auto' : 'smooth' });
+      made.filter((b, i) => fresh.includes(view.items[i].at)).forEach(appear);
+    }
   }
   // The list says where it goes on: the end with more items past it fades out
   function fades() {
@@ -182,15 +201,38 @@
   list.addEventListener('scroll', fades, { passive: true });
   new ResizeObserver(fades).observe(list);
 
-  // Feedback: the key dips while it is held, and a tap that ran its action flashes the rim in
-  // the accent once. Neither moves focus.
+  // Feedback: the key dips while it is held, and a tap that ran its action flashes it for
+  // FLASH_MS, with a click if the settings ask for one. Neither moves focus.
   const calm = matchMedia('(prefers-reduced-motion: reduce)');
+  let flashed = null, flashTimer = null;
   function flash(b) {
+    clearTimeout(flashTimer);
+    if (flashed) flashed.classList.remove('flash');
+    flashed = b;
+    b.classList.add('flash');
+    flashTimer = setTimeout(() => { b.classList.remove('flash'); flashed = null; }, FLASH_MS);
+  }
+  // Made on the first click, by WebAudio: a short falling tone, quiet and over within 30 ms
+  let audio = null;
+  function click() {
+    if (!sound || !window.AudioContext) return;
+    try {
+      audio = audio || new AudioContext();
+      if (audio.state === 'suspended') audio.resume();
+      const t = audio.currentTime, tone = audio.createOscillator(), level = audio.createGain();
+      tone.frequency.setValueAtTime(1800, t);
+      tone.frequency.exponentialRampToValueAtTime(700, t + 0.02);
+      level.gain.setValueAtTime(0.06, t);
+      level.gain.exponentialRampToValueAtTime(0.0001, t + 0.025);
+      tone.connect(level).connect(audio.destination);
+      tone.start(t);
+      tone.stop(t + 0.03);
+    } catch (_) {}
+  }
+  function appear(b) {
     if (calm.matches) return;
-    b.querySelector('.key').animate([
-      { boxShadow: '0 0 0 1.5px var(--accent)' },
-      { boxShadow: '0 0 0 1.5px transparent' },
-    ], { duration: 360, easing: 'ease-out' });
+    b.animate([{ opacity: 0 }, { opacity: 1 }], { duration: APPEAR_MS, easing: 'ease-out' });
+    b.querySelector('.key').animate([{ transform: 'scale(.85)' }, { transform: 'none' }], { duration: APPEAR_MS, easing: 'ease-out' });
   }
 
   // The name label: opens after a long press or a hover, closes on release, leave or a press elsewhere
@@ -198,9 +240,13 @@
   let cardFor = null;
   function showCard(b) {
     const it = shown[Number(b.dataset.i)];
-    card.querySelector('.c-title').textContent = it.name;
-    card.querySelector('.c-sub').textContent = it.hint || '';
-    cardFor = b;
+    openCard(b, it.name, it.hint);
+  }
+  // The same label, level with `anchor`: an item, or the whole list for a note about the keys
+  function openCard(anchor, title, sub) {
+    card.querySelector('.c-title').textContent = title;
+    card.querySelector('.c-sub').textContent = sub || '';
+    cardFor = anchor;
     card.hidden = false;
     placeCard();
     // Only the label's own rectangle, with room for its shadow, is let through the window
@@ -239,8 +285,9 @@
   keys.addEventListener('pointerdown', e => {
     hideCard();
     const b = e.target.closest('.item');
+    // The item is kept as it was at the press: the release taps it whatever is drawn by then
     press = {
-      id: e.pointerId, index: b ? Number(b.dataset.i) : -1, x: e.clientX, y: e.clientY,
+      id: e.pointerId, index: b ? Number(b.dataset.i) : -1, item: b ? shown[Number(b.dataset.i)] : null, x: e.clientX, y: e.clientY,
       scroll: flat() ? list.scrollLeft : list.scrollTop, mouse: e.pointerType === 'mouse', long: false, scrolling: false,
     };
     try { keys.setPointerCapture(e.pointerId); } catch (_) {}
@@ -273,14 +320,19 @@
     press = null;
     lift();
     hideCard();
-    if (p.scrolling || p.long || p.index < 0) return;
-    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) >= SLOP || !keyAt(p.index)) return;
-    flash(keyAt(p.index));
-    invoke('tap', { index: p.index, pointer: e.pointerType || 'unknown' });
+    const tap = !p.scrolling && !p.long && p.index >= 0 && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP && keyAt(p.index);
+    if (tap) {
+      flash(keyAt(p.index));
+      click();
+      // Rust is told the item's place in the settings file; the plus has none
+      const it = p.item;
+      invoke('tap', { index: it.add ? null : it.at, pointer: e.pointerType || 'unknown' });
+    }
+    afterPress();
   }
   window.addEventListener('pointerup', release);
   // The press was taken away without a release: nothing stays pressed and no label stays open
-  const drop = () => { press = null; lift(); hideCard(); };
+  const drop = () => { press = null; lift(); hideCard(); afterPress(); };
   window.addEventListener('pointercancel', drop);
   keys.addEventListener('lostpointercapture', drop);
 
@@ -312,15 +364,51 @@
   window.__TAURI__.event.listen('hover', e => hover(e.payload));
 
   // Rust watches the programs the items open and the windows they wait for, and says when one
-  // appears or goes: [running, live] for each item
+  // appears or goes: [running, live] for each item of the settings file, shown or not
   window.__TAURI__.event.listen('marks', e => {
-    e.payload.forEach(([on, live], i) => {
-      const b = list.children[i];
-      if (!b) return;
-      b.classList.toggle('on', on);
-      b.classList.toggle('live', live);
-    });
+    for (const b of list.children) {
+      const mark = e.payload[shown[Number(b.dataset.i)].at];
+      if (!mark) continue;
+      b.classList.toggle('on', mark[0]);
+      b.classList.toggle('live', mark[1]);
+    }
   });
+
+  // A `hold` item's key went down or came up, by a tap or by itself: the places in the settings
+  // file of the items whose key is down now
+  window.__TAURI__.event.listen('held', e => {
+    for (const b of list.children) b.classList.toggle('held', e.payload.includes(shown[Number(b.dataset.i)].at));
+  });
+
+  // The active program brought its own items or took them away. The first time in a start a
+  // program brings its items, Rust also sends a few words about whose keys they are: they show
+  // for a moment beside the list, the way a key's label does.
+  // Any drawing waits while a key is held, whether the press came before the change or while
+  // Rust was answering: the keys are not redrawn under the finger, the held key keeps its label,
+  // and the release taps the key it was on. `later` is the drawing put off: whether it brings a
+  // new set, and its note.
+  let later = null;
+  function putOff(set, note) {
+    later = { set: set || !!(later && later.set), note: note || (later && later.note) || null };
+  }
+  function redraw(set = false, note = null) {
+    if (press) return putOff(set, note);
+    invoke('get_view').then(view => {
+      if (press) return putOff(set, note);
+      setChange = setChange || set;
+      render(view);
+      if (!note) return;
+      openCard(list, note, '');
+      cardTimer = setTimeout(hideCard, NOTE_MS);
+    });
+  }
+  function afterPress() {
+    if (!later) return;
+    const { set, note } = later;
+    later = null;
+    redraw(set, note);
+  }
+  window.__TAURI__.event.listen('set', e => redraw(true, e.payload));
 
   // Windows carries the capsule by its handle; Rust says when a carry starts. The drop ends with
   // a reload: the capsule is back on an edge.
@@ -330,11 +418,10 @@
     hideCard();
     document.body.classList.add('dragging');
   });
-  const refresh = () => invoke('get_view').then(render);
   window.__TAURI__.event.listen('reload', () => {
     document.body.classList.remove('dragging');
-    refresh();
+    redraw();
   });
-  refresh();
+  redraw();
 </script></body>
 </html>

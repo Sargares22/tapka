@@ -47,7 +47,7 @@ for (const [theme, accent] of [['dark', '#8ab4ff'], ['light', '#ff8a3d']]) {
   const settings = {
     items: sample.map(raw => ({ raw, icon: null, glyph: glyphs[raw.icon] || null, problem: null })),
     scale: 1, edge: 'right', theme, accent, lang: 'en', russian: false, autostart: false, updates: true, tablet_only: false, version: '0.0.0', error: null, intro: false,
-    presets: sample.slice(0, 3).map(item => ({ id: item.icon, item })), glyphs, update: { state: 'none' },
+    presets: sample.slice(0, 3).map(item => ({ id: item.icon, item })), pages: [], bundles: [], glyphs, update: { state: 'none' },
   };
   shoot('settings.html', 'settings-' + theme, '880,1100', { get_settings: settings });
   // The Look section, in Russian and with its switch on

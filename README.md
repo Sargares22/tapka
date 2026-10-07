@@ -39,9 +39,13 @@ To remove it: Windows Settings → Installed apps. Antivirus nervous because the
 - **Four keys in sight.** The rest scroll under your finger, and the **+** at the foot opens the editor.
 - **Stays where you put it.** Drag the capsule by its handle to the left, right or top edge; it stays there, even after a rotation.
 - **Like the taskbar, but for fingers.** Without a keyboard the keys spread apart. A running program's key carries a mark, and a second tap brings its window forward or minimizes it; Tapka never closes anything.
+- **Keys per app.** Set a key's *Where to show* to one program, and it appears while that program's window is in front. The first time, the capsule says *Keys for …*.
+- **Shift stays down for the pen.** A tap on *Hold Shift* (or Ctrl, Alt, Space) keeps the key down while you draw; the next tap lets it go.
+- **Touch feedback.** A tapped key flashes and dips; a quiet click can be switched on in Look.
+- **Add without typing.** Programs pinned to the taskbar, Windows Settings pages and ready sets go in with a tap.
 - **Your look.** Dark, light or system theme, any accent, three sizes, Russian and English. Updates are quiet, once per start, and can be switched off.
 
-Ready-made Windows actions: snip an area, paste, copy, undo, voice typing, task view, show desktop, File Explorer, Settings, on-screen keyboard, clipboard history, emoji, louder, quieter, mute, play/pause, next track.
+Ready-made Windows actions: snip an area, paste, copy, undo, redo, select all, voice typing, task view, show desktop, File Explorer, Settings, on-screen keyboard, clipboard history, emoji, louder, quieter, mute, play/pause, next track, hold Shift, Ctrl, Alt or Space.
 
 ## Your own keys
 
@@ -49,18 +53,19 @@ Tap the **+** on the capsule, or open the settings from the tray icon.
 
 <p align="center"><img src="assets/settings.png" width="760" alt="The settings window"></p>
 
-**Add** offers four kinds of keys:
+**Add** offers five kinds of keys:
 
-- **Program:** pick an installed one; its name and icon come along.
-- **Site, file or folder:** type an address, or choose a file or folder.
+- **Program:** the programs pinned to your taskbar on top, every installed one below; its name and icon come along.
+- **Windows action:** one of the ready-made ones, or a Settings page such as Bluetooth, Wi-Fi, sound, display or Windows Update.
+- **Website or file:** type an address, or choose a file or folder.
 - **Keyboard shortcut:** press it, or build it with the Ctrl, Shift, Alt and Win buttons.
-- **Windows action:** one of the ready-made ones.
+- **Ready set:** several keys at once: Tablet, Drawing or Text. A set can go to one program right away; keys already in the list are not added twice.
 
-Drag keys by the dots to reorder; the pencil edits name, hint and icon; the bin removes, with an Undo.
+Drag keys by the dots to reorder. A tap on a row opens the key's card: name, hint, icon, where to show, and *Remove*, with an Undo.
 
 ### The settings file
 
-Everything lives in `%APPDATA%\sargares22.tapka\settings.json`; the settings window opens it for you (General → Settings file). Edit it by hand, with a script or through an AI agent: the panel picks changes up within a second.
+Everything lives in `%APPDATA%\sargares22.tapka\settings.json`; the settings window opens it for you (General → Advanced → Settings file). Edit it by hand, with a script or through an AI agent: the panel picks changes up within a second.
 
 ```json
 {
@@ -76,8 +81,9 @@ Everything lives in `%APPDATA%\sargares22.tapka\settings.json`; the settings win
 }
 ```
 
-- `action`: `open` with `target` (program, file, folder, address or `shell:AppsFolder\…`), or `hotkey` with `keys`, like `ctrl+shift+k`.
+- `action`: `open` with `target` (program, file, folder, address or `shell:AppsFolder\…`), or `hotkey` with `keys`, like `ctrl+shift+k`, or `hold` with `keys` set to `shift`, `ctrl`, `alt` or `space`.
 - `icon`: a built-in icon (all are in the editor) or a PNG or SVG from the `icons` folder next to the file. Without it, a program shows its own icon, anything else its first letter.
+- `only_in`: a program's file name or Store package family, like `"only_in": "mspaint.exe"`. The key is on the capsule only while that program's window is active, right after the first two keys for all programs. The editor sets it too: *Where to show*.
 - `top` (0 to 1) places the capsule along its edge; `tablet_only: true` hides it while a keyboard is attached. The exact `top` and the `lit` rule are file-only.
 - A broken item is skipped, and the tray tooltip says what is wrong.
 
@@ -92,8 +98,15 @@ Tapka is not tied to any other program. Here is what people connect:
     "lit": { "program": "handy.exe", "window": "Recording" } }
   ```
 
-- **AI chats.** Add an app (ChatGPT, Claude, Copilot) as *Program*, a web chat as *Site, file or folder*.
-- **A folder you live in.** *Add → Site, file or folder → Folder…*
+- **A pen and a held Shift.** *Add → Windows action → Hold Shift* (or Ctrl, Alt, Space). A tap presses the key and keeps it down while you draw, the key glows, the next tap lets it go. Forgotten, it lets go by itself after 20 seconds without a tap on the capsule, or when another program comes to the front. Meanwhile the other keys work as usual, together with the held one. For one program only:
+
+  ```json
+  { "name": "Shift", "icon": "shift", "action": "hold", "keys": "shift", "only_in": "mspaint.exe" }
+  ```
+
+- **For artists.** *Add → Ready set*, under *Where to show* pick *In one program* and your drawing app (Paint, Krita, Photoshop), then *Add* next to Drawing. Undo, Redo, Hold Shift, Ctrl and Space and Snip appear on the capsule only while it is in front.
+- **AI chats.** Add an app (ChatGPT, Claude, Copilot) as *Program*, a web chat as *Website or file*.
+- **A folder you live in.** *Add → Website or file → Folder…*
 - **Deep links.** The address field takes any link Windows opens: `ms-settings:bluetooth`, `ms-availablenetworks:` (Wi‑Fi), `ms-actioncenter:` (notifications), `claude://code/new?folder=C:\Projects\mine` and `codex://threads/new?path=C:\Projects\mine` (a new session in that folder), `tg://resolve?domain=name`. Schemes depend on what is installed; see [awesome-deeplinks](https://github.com/f/awesome-deeplinks).
 - **Another program's shortcut.** Ctrl, Shift, Alt, Win plus a letter, digit, F1–F24, navigation key, media key, period or comma all work. The numpad is not supported yet, and keys do not reach programs running as administrator.
 
@@ -101,7 +114,7 @@ Tapka is not tied to any other program. Here is what people connect:
 
 What the panel does:
 
-- sends key presses to the active window when you tap a key that carries a shortcut;
+- sends key presses to the active window when you tap a key that carries a shortcut or holds a key;
 - reads the list of windows and their titles twice a second, to mark the programs that are running;
 - with update checks on, contacts GitHub once per start.
 

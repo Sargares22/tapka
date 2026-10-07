@@ -36,6 +36,11 @@ struct AppState {
     carry: Mutex<Option<Carry>>,
     /// For each item: the program it opens has a window, and its `lit` window is showing.
     marks: Mutex<Vec<(bool, bool)>>,
+    /// The program of the active window, as `win::front_program` last saw it: which items with
+    /// `only_in` are on the capsule.
+    front: Mutex<Option<(String, Option<String>)>>,
+    /// The programs whose items the capsule has already introduced since the start, by file name.
+    introduced: Mutex<Vec<String>>,
     /// This start created the settings file: the settings window opens once, with a few words
     /// about the panel.
     intro: AtomicBool,
@@ -51,6 +56,8 @@ struct AppState {
     /// the same way. Showing and hiding only post a request to the windows and wait for nothing,
     /// so this lock is safe to hold across them.
     showing: Mutex<()>,
+    /// The keys `hold` items keep pressed, and when the capsule was last tapped.
+    holds: Mutex<actions::Holds>,
 }
 
 /// The panel never says it is the latest version before a check has passed.
@@ -108,6 +115,8 @@ fn applog(app: &AppHandle, line: &str) {
 /// An item as the page draws it.
 #[derive(serde::Serialize)]
 struct PageItem {
+    /// Its place in the settings file's list: what a tap reports.
+    at: usize,
     name: String,
     hint: Option<String>,
     /// A picture as a data URL: the user's own file or the program's icon.
@@ -118,6 +127,8 @@ struct PageItem {
     on: bool,
     /// The window this item watches for (`lit` in the settings) is showing: recording, say.
     live: bool,
+    /// The key this `hold` item keeps pressed is down.
+    held: bool,
 }
 
 /// An item's picture: `(data URL, built-in SVG)`, at most one of them. In order: the built-in the
@@ -182,6 +193,40 @@ fn windows_of<'a>(item: &config::Item, windows: &'a [win::AppWindow]) -> Vec<&'a
     windows.iter().filter(|w| actions::belongs(target, &w.exe, w.family.as_deref())).collect()
 }
 
+/// The items on the capsule now, as places in the settings' list: those for all programs, then
+/// those for the active one (`actions::shown_items`).
+fn shown_now(app: &AppHandle, items: &[config::Item]) -> Vec<usize> {
+    let front = app.state::<AppState>().front.lock().unwrap().clone();
+    actions::shown_items(items, program_ref(&front))
+}
+
+fn program_ref(program: &Option<(String, Option<String>)>) -> Option<(&str, Option<&str>)> {
+    program.as_ref().map(|(exe, family)| (exe.as_str(), family.as_deref()))
+}
+
+/// The programs in the Start menu. Listing them takes a moment, so it is done once, and again
+/// each time the editor lists them for a new item.
+static INSTALLED: Mutex<Option<Vec<apps::App>>> = Mutex::new(None);
+
+fn installed_known() -> Vec<apps::App> {
+    if let Some(apps) = INSTALLED.lock().unwrap().clone() {
+        return apps;
+    }
+    let apps = apps::installed();
+    *INSTALLED.lock().unwrap() = Some(apps.clone());
+    apps
+}
+
+/// What the editor calls the program an `only_in` names: the name of its running window's
+/// program if it has one, otherwise the Start menu's name for it, otherwise its file name.
+fn program_label(only_in: &str, windows: &[win::AppWindow], apps: &[apps::App]) -> String {
+    match windows.iter().find(|w| actions::runs_in(only_in, &w.exe, w.family.as_deref())) {
+        Some(w) => apps::name_of(apps, &w.exe, w.family.as_deref()),
+        None if only_in.ends_with(".exe") => apps::name_of(apps, only_in.rsplit(['\\', '/']).next().unwrap_or(only_in), None),
+        None => apps::name_of(apps, "", Some(only_in)),
+    }
+}
+
 /// For each item: whether its program has a window, and whether the window it watches for is
 /// showing. Looks at the desktop; never call it with a lock held.
 fn item_marks(items: &[config::Item]) -> Vec<(bool, bool)> {
@@ -206,6 +251,8 @@ struct View {
     /// `system`, `dark` or `light`.
     theme: &'static str,
     accent: String,
+    /// A quiet click on a tap.
+    click_sound: bool,
     /// The name and the hint of the last key, the one that opens the editor.
     add: (&'static str, &'static str),
 }
@@ -217,13 +264,14 @@ fn get_view(app: AppHandle) -> View {
     // The settings are copied out: no lock is held while files are read or the desktop is looked at
     let settings = state.settings.lock().unwrap().clone();
     let marks = item_marks(&settings.items);
-    let items = settings
-        .items
-        .iter()
-        .zip(marks)
-        .map(|(it, (on, live))| {
+    let held = held_items(&settings.items, state.holds.lock().unwrap().held());
+    let items = shown_now(&app, &settings.items)
+        .into_iter()
+        .map(|at| {
+            let it = &settings.items[at];
             let (icon, glyph) = item_icon(&app, it);
-            PageItem { on, live, name: it.name.clone(), hint: it.hint.clone(), icon, glyph }
+            let (on, live) = marks[at];
+            PageItem { at, on, live, held: held.contains(&at), name: it.name.clone(), hint: it.hint.clone(), icon, glyph }
         })
         .collect();
     let add = if is_russian(&settings) { ("Добавить", "Открыть редактор пунктов") } else { ("Add", "Open the item editor") };
@@ -234,8 +282,69 @@ fn get_view(app: AppHandle) -> View {
         edge: config::edge_name(settings.edge),
         theme: config::theme_name(settings.theme),
         accent: settings.accent.clone(),
+        click_sound: settings.click_sound,
         add,
     }
+}
+
+/// The places in the settings' list of the `hold` items whose key is down: they are lit.
+fn held_items(items: &[config::Item], held: &[u16]) -> Vec<usize> {
+    let down = |item: &config::Item| match &item.action {
+        config::Action::Hold(key) => keys::holdable(key).is_some_and(|vk| held.contains(&vk)),
+        _ => false,
+    };
+    (0..items.len()).filter(|&i| down(&items[i])).collect()
+}
+
+/// Tells the page which items hold their key down now.
+fn show_held(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let held = state.holds.lock().unwrap().held().to_vec();
+    let lit = held_items(&state.settings.lock().unwrap().items, &held);
+    let _ = app.emit("held", lit);
+}
+
+/// A tap on a `hold` item: its key goes down, or up if it was held. The key is sent with the holds
+/// locked (`actions::Holds`); there is no keyboard hook in the panel for SendInput to wait on.
+fn hold(app: &AppHandle, key: &str) -> Result<(), String> {
+    let vk = keys::holdable(key).ok_or(format!("cannot hold \"{key}\""))?;
+    let mut sent = Ok(());
+    let down = app.state::<AppState>().holds.lock().unwrap().toggle(vk, |vk, up| sent = win::send_key(vk, up));
+    applog(app, &format!("hold: {key} {}", if down { "down" } else { "up" }));
+    show_held(app);
+    sent
+}
+
+/// Lets go of held keys, every one of them or, with `idle`, only once the wait for a tap has run
+/// out, and puts their items out. The keys go up with the holds locked, as in `hold`.
+fn let_go(app: &AppHandle, why: &str, idle: bool) {
+    let mut failed = Vec::new();
+    let send = |vk: u16, up: bool| {
+        if let Err(e) = win::send_key(vk, up) {
+            failed.push(format!("action failed: let go of key {vk:#x}: {e}"));
+        }
+    };
+    let state = app.state::<AppState>();
+    let vks = {
+        let mut holds = state.holds.lock().unwrap();
+        if idle {
+            holds.expire(std::time::Instant::now(), send)
+        } else {
+            holds.release_all(send)
+        }
+    };
+    if vks.is_empty() {
+        return;
+    }
+    applog(app, &format!("hold: let go of {} key(s): {why}", vks.len()));
+    for line in failed {
+        applog(app, &line);
+    }
+    show_held(app);
+}
+
+fn let_go_all(app: &AppHandle, why: &str) {
+    let_go(app, why, false);
 }
 
 /// Hides the capsule and brings it back when the clipboard changes or the wait runs out.
@@ -244,6 +353,7 @@ fn hide_capsule_until_snapshot(app: &AppHandle) -> Result<(), String> {
     let w = app.get_webview_window("capsule").ok_or("no capsule window")?;
     let state = app.state::<AppState>();
     let hwnd = w.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    let_go_all(app, "the capsule hid for a snapshot");
     // A second snapshot before the first wait ran out: only the latest wait shows the capsule
     static HIDES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let mine = {
@@ -289,7 +399,13 @@ fn hide_capsule_until_snapshot(app: &AppHandle) -> Result<(), String> {
 fn run_step(app: &AppHandle, step: actions::Step) {
     let result = match &step {
         actions::Step::Open(target) => win::open(target),
-        actions::Step::SendKeys(keys) => keys::parse(keys).and_then(|vks| win::send_keys(&vks)),
+        // Sent with the holds locked, so a held key cannot come up between the look and the send
+        actions::Step::SendKeys(keys) => keys::parse(keys).and_then(|vks| {
+            let state = app.state::<AppState>();
+            let holds = state.holds.lock().unwrap();
+            win::send_keys(&actions::without_held(&vks, holds.held()))
+        }),
+        actions::Step::Hold(key) => hold(app, key),
         actions::Step::HideCapsule => hide_capsule_until_snapshot(app),
         actions::Step::Show(target) => {
             let windows = win::app_windows();
@@ -310,23 +426,27 @@ fn run_step(app: &AppHandle, step: actions::Step) {
     }
 }
 
-/// The page reports a tap on key `index`: an item, or the last key, which opens the editor. The
-/// action runs off the main thread.
+/// The page reports a tap on the item at `index` in the settings' list, or with no index on the
+/// last key, which opens the editor. The action runs off the main thread.
 #[tauri::command]
-fn tap(app: AppHandle, index: usize, pointer: String) {
-    let (item, count) = {
-        let state = app.state::<AppState>();
-        let settings = state.settings.lock().unwrap();
-        (settings.items.get(index).cloned(), settings.items.len())
-    };
-    if index == count {
+fn tap(app: AppHandle, index: Option<usize>, pointer: String) {
+    app.state::<AppState>().holds.lock().unwrap().touch(std::time::Instant::now());
+    let Some(index) = index else {
         applog(&app, &format!("tap: add pointer={pointer}"));
         // A window made from inside a command on the main thread would wait for itself
         std::thread::spawn(move || open_settings_window(&app));
         return;
-    }
+    };
+    let item = app.state::<AppState>().settings.lock().unwrap().items.get(index).cloned();
     let Some(item) = item else { return };
     applog(&app, &format!("tap: item {} \"{}\" pointer={pointer}", index + 1, item.name));
+    // A key to hold goes down or up here, on the thread of the taps, so quick taps keep their order
+    if matches!(item.action, config::Action::Hold(_)) {
+        for step in actions::steps_for(&item.action, actions::Running::No) {
+            run_step(&app, step);
+        }
+        return;
+    }
     std::thread::spawn(move || {
         let windows = win::app_windows();
         let mine = windows_of(&item, &windows);
@@ -392,7 +512,8 @@ fn place_capsule(app: &AppHandle, settings: &config::Settings) {
     }
     let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
     let k = mon.scale_factor() * settings.scale;
-    let (x, y, width, height) = layout::window_rect(work, k, settings.top, cell, settings.items.len(), settings.edge);
+    let shown = shown_now(app, &settings.items).len();
+    let (x, y, width, height) = layout::window_rect(work, k, settings.top, cell, shown, settings.edge);
     let changed = *state.px_per_css.lock().unwrap() != k;
     *state.px_per_css.lock().unwrap() = k;
     if changed {
@@ -434,10 +555,8 @@ fn carry_begin(app: &AppHandle, handle: isize) {
     };
     let Ok(hwnd) = w.hwnd().map(|h| h.0 as isize) else { return };
     let (Some(capsule), Some(grip)) = (win::window_rect(hwnd), win::window_rect(handle)) else { return };
-    let (cell, items) = {
-        let settings = state.settings.lock().unwrap();
-        (layout::cell(state.tablet.load(Ordering::Relaxed)), settings.items.len())
-    };
+    let items = state.settings.lock().unwrap().items.clone();
+    let (cell, items) = (layout::cell(state.tablet.load(Ordering::Relaxed)), shown_now(app, &items).len());
     let offset = (capsule.0 - grip.0, capsule.1 - grip.1);
     *state.carry.lock().unwrap() = Some(Carry { hwnd, offset, work, strip, k, cell, items });
     state.card_open.store(false, Ordering::Relaxed);
@@ -520,17 +639,26 @@ fn get_settings(app: AppHandle) -> Value {
         .and_then(|text| serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')).ok())
         .and_then(|v| v.get("items").and_then(Value::as_array).cloned())
         .unwrap_or_default();
+    // The programs are looked up only when some item is for one program
+    let programs = s.items.iter().any(|it| it.only_in.is_some()).then(|| (win::app_windows(), installed_known()));
     let items: Vec<Value> = raw
         .into_iter()
         .map(|raw| match config::parse_item(&raw) {
             Ok(item) => {
                 let (icon, glyph) = item_icon(&app, &item);
-                json!({ "raw": raw, "icon": icon, "glyph": glyph, "problem": null })
+                let only = item.only_in.as_deref().zip(programs.as_ref()).map(|(p, (windows, apps))| program_label(p, windows, apps));
+                json!({ "raw": raw, "icon": icon, "glyph": glyph, "problem": null, "only": only })
             }
-            Err(why) => json!({ "raw": raw, "icon": null, "glyph": null, "problem": why }),
+            Err(why) => json!({ "raw": raw, "icon": null, "glyph": null, "problem": why, "only": null }),
         })
         .collect();
     let presets: Vec<Value> = config::PRESETS.iter().map(|p| json!({ "id": p.id, "item": config::preset_item(p, russian) })).collect();
+    let pages: Vec<Value> = config::PAGES.iter().map(|p| json!({ "item": config::page_item(p, russian) })).collect();
+    // A ready set as the editor lists it: its name and the items it brings, by name and icon
+    let bundles: Vec<Value> = config::BUNDLES
+        .iter()
+        .map(|b| json!({ "id": b.id, "name": if russian { b.ru } else { b.en }, "items": config::bundle_items(b, russian, None, &[]) }))
+        .collect();
     let glyphs: serde_json::Map<String, Value> = glyphs::names().map(|n| (n.to_string(), json!(glyphs::builtin(n)))).collect();
     json!({
         "items": items,
@@ -543,10 +671,13 @@ fn get_settings(app: AppHandle) -> Value {
         "autostart": autostart::is_enabled(),
         "updates": s.updates,
         "tablet_only": s.tablet_only,
+        "click_sound": s.click_sound,
         "version": app.package_info().version.to_string(),
         "error": *state.error.lock().unwrap(),
         "intro": state.intro.load(Ordering::Relaxed),
         "presets": presets,
+        "pages": pages,
+        "bundles": bundles,
         "glyphs": glyphs,
         "update": *state.update.lock().unwrap(),
     })
@@ -574,6 +705,7 @@ fn set_pref(app: AppHandle, key: String, value: Value) -> Result<(), String> {
         "scale" => json!(config::snap_scale(value.as_f64().ok_or("scale: not a number")?)),
         "updates" => json!(value.as_bool().ok_or("updates: not a switch")?),
         "tablet_only" => json!(value.as_bool().ok_or("tablet_only: not a switch")?),
+        "click_sound" => json!(value.as_bool().ok_or("click_sound: not a switch")?),
         _ => return Err(format!("unknown setting {key}")),
     };
     write_field(&app, &key, value)
@@ -587,7 +719,39 @@ fn save_items(app: AppHandle, items: Vec<Value>) -> Result<(), String> {
 
 #[tauri::command(async)]
 fn installed_apps() -> Vec<apps::App> {
-    apps::installed()
+    let apps = apps::installed();
+    *INSTALLED.lock().unwrap() = Some(apps.clone());
+    apps
+}
+
+/// The shortcuts pinned to the taskbar, for the editor's list.
+#[tauri::command(async)]
+fn pinned_apps() -> Vec<apps::App> {
+    apps::pinned()
+}
+
+/// The items a ready set adds to the editor's list, named in the language of the panel, each for
+/// one program when `only_in` names it; what the list already has is left out.
+#[tauri::command(async)]
+fn bundle_items(app: AppHandle, id: String, only_in: Option<String>, items: Vec<Value>) -> Result<Vec<Value>, String> {
+    let bundle = config::BUNDLES.iter().find(|b| b.id == id).ok_or(format!("unknown set {id}"))?;
+    let russian = is_russian(&app.state::<AppState>().settings.lock().unwrap());
+    Ok(config::bundle_items(bundle, russian, only_in.as_deref(), &items))
+}
+
+/// The programs that have windows right now, by name, for the editor's "Show only in" list: each
+/// as `{ name, exe }`.
+#[tauri::command(async)]
+fn running_programs() -> Vec<Value> {
+    let apps = installed_known();
+    let mut found: Vec<(String, String)> = Vec::new();
+    for w in win::app_windows() {
+        if !found.iter().any(|(_, exe)| *exe == w.exe) {
+            found.push((apps::name_of(&apps, &w.exe, w.family.as_deref()), w.exe));
+        }
+    }
+    found.sort_by_key(|(name, _)| name.to_lowercase());
+    found.into_iter().map(|(name, exe)| json!({ "name": name, "exe": exe })).collect()
 }
 
 /// The icon Windows shows for a program, for the editor's list.
@@ -701,24 +865,34 @@ fn window_theme(theme: config::Theme) -> Option<tauri::Theme> {
     }
 }
 
-/// The settings window: created on demand, brought forward if open. It opens on the items.
+/// The settings window: created on demand, brought forward if open. It opens on the items. It
+/// has no taskbar button, so it is put in front by force: a tap on the capsule, which never takes
+/// focus, gives the panel no right to change the active window.
 fn open_settings_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("settings") {
         let _ = w.unminimize();
         let _ = w.show();
-        let _ = w.set_focus();
+        if let Ok(hwnd) = w.hwnd() {
+            let _ = win::bring_to_front(hwnd.0 as isize);
+        }
         let _ = w.emit("section", "items");
         return;
     }
     let theme = app.state::<AppState>().settings.lock().unwrap().theme;
     let built = tauri::WebviewWindowBuilder::new(app, "settings", tauri::WebviewUrl::App("settings.html".into()))
         .title("Tapka")
+        .skip_taskbar(true)
         .inner_size(880.0, 640.0)
         .min_inner_size(640.0, 460.0)
         .theme(window_theme(theme))
         .build();
-    if let Err(why) = built {
-        applog(app, &format!("settings window: {why}"));
+    match built {
+        Ok(w) => {
+            if let Ok(hwnd) = w.hwnd() {
+                let _ = win::bring_to_front(hwnd.0 as isize);
+            }
+        }
+        Err(why) => applog(app, &format!("settings window: {why}")),
     }
 }
 const TRAY_TITLE: &str = "Tapka";
@@ -741,6 +915,9 @@ fn update_tray_tooltip(app: &AppHandle) {
 /// Shows or hides the capsule without giving it focus. During a snapshot it is only remembered
 /// that the capsule should be shown: the snapshot's own return shows it.
 fn set_capsule_visible(app: &AppHandle, visible: bool) {
+    if !visible {
+        let_go_all(app, "the capsule was hidden");
+    }
     let state = app.state::<AppState>();
     let _turn = state.showing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     state.wanted.store(visible, Ordering::Relaxed);
@@ -872,6 +1049,35 @@ fn screen(app: &AppHandle) -> Option<((i32, i32, u32, u32), f64)> {
     Some(((wa.position.x, wa.position.y, wa.size.width, wa.size.height), mon.scale_factor()))
 }
 
+/// Looks at the active window's program. When it brings other items to the capsule, the capsule
+/// takes the new set; the first time in this start a program brings its own items, the page is
+/// also given the words that say whose they are.
+fn follow_front(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let front = win::front_program();
+    let before = std::mem::replace(&mut *state.front.lock().unwrap(), front.clone());
+    if front == before {
+        return;
+    }
+    let_go_all(app, "the active program changed");
+    let settings = state.settings.lock().unwrap().clone();
+    let now = actions::shown_items(&settings.items, program_ref(&front));
+    if now == actions::shown_items(&settings.items, program_ref(&before)) {
+        return;
+    }
+    let brings = now.iter().any(|&i| settings.items[i].only_in.is_some());
+    let note = match &front {
+        Some((exe, family)) if brings && !state.introduced.lock().unwrap().contains(exe) => {
+            state.introduced.lock().unwrap().push(exe.clone());
+            let name = apps::name_of(&installed_known(), exe, family.as_deref());
+            Some(if is_russian(&settings) { format!("Клавиши для {name}") } else { format!("Keys for {name}") })
+        }
+        _ => None,
+    };
+    place_capsule(app, &settings);
+    let _ = app.emit("set", note);
+}
+
 /// Notices a saved settings file, a detached or attached keyboard and a turned or resized screen
 /// within half a second. `by_keyboard` is where the keyboard rule had the capsule at start.
 fn watch_settings(app: AppHandle, mut by_keyboard: bool) {
@@ -890,6 +1096,7 @@ fn watch_settings(app: AppHandle, mut by_keyboard: bool) {
             }
             let tablet = win::tablet_mode();
             let state = app.state::<AppState>();
+            let_go(&app, &format!("no tap for {} seconds", actions::HOLD_IDLE_MS / 1000), true);
             // The screen was turned, or its resolution, scale or taskbar changed: the capsule goes
             // to the same edge and the same share along it in the new work area
             let now_screen = screen(&app);
@@ -907,6 +1114,7 @@ fn watch_settings(app: AppHandle, mut by_keyboard: bool) {
             let shown = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).is_some_and(|h| win::is_visible(h.0 as isize));
             if shown && state.carry.lock().unwrap().is_none() {
                 grab::raise();
+                follow_front(&app);
             }
             // A program an item opens appeared or closed: the page marks the item
             let items = state.settings.lock().unwrap().items.clone();
@@ -986,6 +1194,9 @@ fn main() {
             set_pref,
             save_items,
             installed_apps,
+            pinned_apps,
+            bundle_items,
+            running_programs,
             icon_of,
             import_icon,
             check_update,
@@ -1009,21 +1220,27 @@ fn main() {
                 px_per_css: Mutex::new(1.0),
                 carry: Mutex::new(None),
                 marks: Mutex::new(Vec::new()),
+                front: Mutex::new(None),
+                introduced: Mutex::new(Vec::new()),
                 intro: AtomicBool::new(created),
                 update: Mutex::new(Update::None),
                 wanted: AtomicBool::new(by_keyboard),
                 snapping: AtomicBool::new(false),
                 showing: Mutex::new(()),
+                holds: Mutex::new(actions::Holds::default()),
             });
             grab::start(app.handle().clone());
-            if let Some(hwnd) = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()) {
-                win::quiet_frame(hwnd.0 as isize);
+            let capsule = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize);
+            if let Some(hwnd) = capsule {
+                win::tool_window(hwnd);
+                win::quiet_frame(hwnd);
             }
             let settings = app.state::<AppState>().settings.lock().unwrap().clone();
             place_capsule(app.handle(), &settings);
             if by_keyboard {
-                if let Some(w) = app.get_webview_window("capsule") {
-                    let _ = w.show();
+                // Not through Tauri's show: it rewrites the window's style, taskbar button included
+                if let Some(hwnd) = capsule {
+                    win::set_visible(hwnd, true);
                 }
                 // The handle was placed while the capsule was not yet on screen
                 grab::set_visible(true);
@@ -1060,6 +1277,12 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Tapka");
+        .build(tauri::generate_context!())
+        .expect("error while running Tapka")
+        .run(|app, event| {
+            // No key stays down after the panel is gone
+            if let tauri::RunEvent::Exit = event {
+                let_go_all(app, "the panel quits");
+            }
+        });
 }
