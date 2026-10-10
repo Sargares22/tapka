@@ -89,6 +89,12 @@
   .key.small{width:32px;height:32px;border-radius:9px}
   .key.small svg{width:16px;height:16px}
   .key.small img{width:20px;height:20px}
+  /* A picture that would not read on its key: of one colour, it is drawn in the ink of the theme;
+     any other gets a plate of that ink (see legible) */
+  .key .sign{width:24px;height:24px;background:currentColor;mask:center/contain no-repeat}
+  .key.big .sign{width:32px;height:32px}
+  .key.small .sign{width:20px;height:20px}
+  .key.plate img{box-sizing:content-box;padding:3px;border-radius:7px;background:var(--key-ink)}
   #items .row{padding-left:4px;background:var(--s1)}
   #items .row:hover{background:var(--s2)}
   #items .row.carried{z-index:2;box-shadow:0 6px 18px var(--shade);border-radius:10px}
@@ -375,7 +381,7 @@
     root.style.setProperty('--accent-fill', fill);
     root.style.setProperty('--on-accent', ratio(fill, '#ffffff') >= 4.5 ? '#fff' : '#000');
   }
-  dark.addEventListener('change', () => S && (paint(), drawPrefs()));
+  dark.addEventListener('change', () => S && (paint(), drawPrefs(), drawItems()));
   function words() {
     lang = S.russian ? 'ru' : 'en';
     document.documentElement.lang = lang;
@@ -432,9 +438,42 @@
   const neutral = raw => { const n = NEUTRAL[kindOf(raw)] || ICON.app; return n.startsWith('<') ? n : S.glyphs[n] || ICON.app; };
   const svgKey = (text, size = '') => { const k = el('span', { className: 'key ' + size }); k.innerHTML = text; return k; };
   const glyphKey = (name, size) => svgKey(S.glyphs[name] || ICON.app, size);
+  // A picture that would be lost on its key, a white sign on a light key or a black one on a
+  // dark key, is made to read in any theme. A picture of one colour is drawn in the ink of the
+  // theme, like the built-in icons; any other gets a plate of that ink under it.
+  function legible(img) {
+    const key = img.parentElement, back = key && getComputedStyle(key).backgroundColor.match(/[0-9.]+/g);
+    if (!back) return;
+    // LOST is how close to the key's colour a dot is hard to see, MOST the share of such dots
+    const LOST = 90, MOST = 0.7;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 24;
+    let px;
+    try {
+      const paper = canvas.getContext('2d', { willReadFrequently: true });
+      paper.drawImage(img, 0, 0, 24, 24);
+      px = paper.getImageData(0, 0, 24, 24).data;
+    } catch (_) { return; }
+    let n = 0, lost = 0, lo = 255, hi = 0, colour = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 3] < 96) continue;
+      const [r, g, b] = [px[i], px[i + 1], px[i + 2]];
+      n++;
+      if (Math.hypot(r - back[0], g - back[1], b - back[2]) < LOST) lost++;
+      lo = Math.min(lo, r, g, b); hi = Math.max(hi, r, g, b);
+      colour = Math.max(colour, Math.max(r, g, b) - Math.min(r, g, b));
+    }
+    if (!n || lost < n * MOST) return;
+    if (hi - lo > 64 || colour > 40) return key.classList.add('plate');
+    const sign = document.createElement('span');
+    sign.className = 'sign';
+    sign.style.maskImage = `url("${img.src}")`;
+    img.replaceWith(sign);
+  }
+  const picture = src => el('img', { src, alt: '', onload: e => legible(e.target) });
   function keyOf(item, size) {
     if (item.glyph) return svgKey(item.glyph, size);
-    if (item.icon) return el('span', { className: 'key ' + (size || '') }, el('img', { src: item.icon, alt: '' }));
+    if (item.icon) return el('span', { className: 'key ' + (size || '') }, picture(item.icon));
     return svgKey(neutral(item.raw), size);
   }
 
@@ -586,7 +625,7 @@
       for (const f of found) {
         if (!f.isIntersecting) continue;
         seen.unobserve(f.target);
-        invoke('icon_of', { target: f.target.dataset.target }).then(icon => { if (icon) f.target.querySelector('.key').replaceChildren(el('img', { src: icon, alt: '' })); });
+        invoke('icon_of', { target: f.target.dataset.target }).then(icon => { if (icon) f.target.querySelector('.key').replaceChildren(picture(icon)); });
       }
     }, { root: $('body') });
     return seen;

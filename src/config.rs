@@ -268,6 +268,18 @@ pub fn with_field(text: &str, key: &str, value: Value) -> Option<String> {
     Some(to_text(&v))
 }
 
+/// The settings text with the item at `from` put where the item at `to` is. Both count the items
+/// the panel uses, the way `parse` numbers them; an item the panel skips keeps its place in the file.
+pub fn with_moved(text: &str, from: usize, to: usize) -> Option<String> {
+    let mut v: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+    let items = v.get_mut("items")?.as_array_mut()?;
+    let used: Vec<usize> = (0..items.len()).filter(|&i| parse_item(&items[i]).is_ok()).collect();
+    let (from, to) = (*used.get(from)?, *used.get(to)?);
+    let item = items.remove(from);
+    items.insert(to, item);
+    Some(to_text(&v))
+}
+
 /// A share of the work area as it is written into the file: 0..1, four decimals.
 pub fn share(v: f64) -> Value {
     let v = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
@@ -507,6 +519,26 @@ mod tests {
         assert_eq!(parse(&with_field("\u{feff}{\"items\":[]}", "top", share(0.5)).unwrap()).unwrap().0.top, 0.5);
         assert!(with_field("not json", "top", share(0.5)).is_none());
         assert!(with_field("[]", "top", share(0.5)).is_none());
+    }
+
+    #[test]
+    fn an_item_is_moved_among_the_items_the_panel_uses() {
+        let file = |names: &[&str]| {
+            let items: Vec<Value> = names.iter().map(|n| if *n == "broken" { json!({ "name": n }) } else { json!({ "name": n, "action": "open", "target": "x" }) }).collect();
+            to_text(&json!({ "top": 0.5, "items": items }))
+        };
+        let names = |text: &str| parse(text).unwrap().0.items.iter().map(|i| i.name.clone()).collect::<Vec<_>>().join(" ");
+        let text = file(&["a", "b", "c", "d"]);
+        assert_eq!(names(&with_moved(&text, 0, 2).unwrap()), "b c a d");
+        assert_eq!(names(&with_moved(&text, 3, 0).unwrap()), "d a b c");
+        assert_eq!(with_moved(&text, 1, 1).unwrap(), text);
+        // An item the panel skips is not counted and stays where it is in the file
+        let text = file(&["a", "broken", "b", "c"]);
+        assert_eq!(with_moved(&text, 0, 2).unwrap(), file(&["broken", "b", "c", "a"]));
+        assert_eq!(with_moved(&text, 2, 0).unwrap(), file(&["c", "a", "broken", "b"]));
+        // A place the list does not have, and not a settings file at all
+        assert!(with_moved(&text, 0, 3).is_none());
+        assert!(with_moved("not json", 0, 1).is_none());
     }
 
     #[test]

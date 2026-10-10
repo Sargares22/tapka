@@ -177,9 +177,17 @@ fn story_15_four_items_show_and_the_rest_scroll() {
     assert_eq!(pill_height(5, CELL), pill_height(4, CELL) + PEEK);
     assert_eq!(pill_height(30, CELL), pill_height(5, CELL));
     assert_eq!(height_css(7, 0.3), height_css(30, 0.3));
-    // Too close to the end of the work area the pill is cut shorter still, MARGIN above the end
-    let room = 912.0 * (1.0 - 0.8);
-    assert!((height_css(10, 0.8) - (room - MARGIN + ROOM)).abs() <= 0.5);
+    // Too close to the end of the work area the window is pulled back until the whole pill shows
+    let (_, y, _, height) = window_rect(work, 2.0, 0.8, CELL, 10, Edge::Right);
+    assert_eq!(height as f64 / 2.0, pill_height(10, CELL) + 2.0 * ROOM);
+    assert_eq!(y + height, 1824);
+    // The same pill at the largest size, with the wider step of a tablet, still shows whole
+    let large = window_rect(work, 2.5, 0.55, CELL * 1.3, 10, Edge::Right);
+    assert_eq!(large.3, ((pill_height(10, CELL * 1.3) + 2.0 * ROOM) * 2.5).round() as i32);
+    assert!(large.1 >= 0 && large.1 + large.3 <= 1824);
+    // Only a pill longer than the work area itself is cut short, MARGIN from its end
+    let low = (0, 0, 2880, 500);
+    assert_eq!(window_rect(low, 2.0, 0.0, CELL, 10, Edge::Right).3 as f64 / 2.0, 250.0 - MARGIN);
 }
 
 #[test]

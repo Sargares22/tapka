@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 (2026-10-10)
+
+- Keys are reordered right on the capsule: hold a key until its label shows, then carry it along the capsule; the others make room and the release leaves it there. The order is saved to the settings file.
+- The capsule shows whole at the large size and without a keyboard: where it did not fit between its place and the end of the screen it was cut short and lost keys; now it is pulled back along the edge.
+- An icon that would be lost on its key reads in either theme: a white sign on a light key, or a black one on a dark key, is drawn in the ink of the theme like the built-in icons; a pale picture of several colours gets a plate under it.
+- The settings window opens in the middle of the screen, and a second tap on *+* while it is opening does nothing.
+
 ## 1.2.0 (2026-10-07)
 
 - Keys for one program: an item with `only_in` (a program's file name like `paint.exe`, or its Store package family) is on the capsule only while that program's window is active, right after the first two keys for all programs. The first time in a start a program brings its keys, the capsule says so once ("Keys for …"). The editor sets it in *Where to show*.

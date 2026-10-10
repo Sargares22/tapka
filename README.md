@@ -61,7 +61,7 @@ Tap the **+** on the capsule, or open the settings from the tray icon.
 - **Keyboard shortcut:** press it, or build it with the Ctrl, Shift, Alt and Win buttons.
 - **Ready set:** several keys at once: Tablet, Drawing or Text. A set can go to one program right away; keys already in the list are not added twice.
 
-Drag keys by the dots to reorder. A tap on a row opens the key's card: name, hint, icon, where to show, and *Remove*, with an Undo.
+Drag keys by the dots to reorder, or right on the capsule: hold a key until its label shows, then carry it to its new place. A tap on a row opens the key's card: name, hint, icon, where to show, and *Remove*, with an Undo.
 
 ### The settings file
 

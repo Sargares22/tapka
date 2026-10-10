@@ -69,22 +69,22 @@ pub fn pill_height(n: usize, cell: f64) -> f64 {
 /// `work` is the work area `(x, y, width, height)` in physical px, `k` is physical px per CSS px
 /// (monitor scale × panel scale). `along` is where the pill starts along its edge, as a share of
 /// the work area: its top edge for an upright capsule, its left end for a flat one.
-/// The pill is as long as `pill_height` says unless that would bring the window closer than MARGIN to the
-/// end of the work area; then it is cut short and the list scrolls inside it. An `along` that
-/// would put the window outside the work area is pulled back in.
+/// The pill is as long as `pill_height` says. Where that is more than fits between `along` and the
+/// end of the work area, the window is pulled back along the edge until the whole pill shows; only a
+/// pill longer than the work area itself is cut short, and then the list scrolls inside it.
 pub fn window_rect(work: (i32, i32, i32, i32), k: f64, along: f64, cell: f64, n: usize, edge: Edge) -> (i32, i32, i32, i32) {
     let (wx, wy, ww, wh) = work;
     let along = if along.is_finite() { along.clamp(0.0, 1.0) } else { 0.0 };
     let full = pill_height(n, cell);
     let least = pill_height(0, cell);
     if edge == Edge::Top {
-        let room = (ww as f64 * (1.0 - along) / k - ROOM - MARGIN).max(least);
+        let room = (ww as f64 / k - 2.0 * ROOM - MARGIN).max(least);
         let width = ((full.min(room) + 2.0 * ROOM) * k).round() as i32;
         let height = ((WIDTH + CARD_ROOM_TOP) * k).round() as i32;
         let x = wx + (ww as f64 * along - ROOM * k).round() as i32;
         return (x.min(wx + ww - width).max(wx), wy, width, height);
     }
-    let room = (wh as f64 * (1.0 - along) / k - ROOM - MARGIN).max(least);
+    let room = (wh as f64 / k - 2.0 * ROOM - MARGIN).max(least);
     let width = ((WIDTH + CARD_ROOM) * k).round() as i32;
     let height = ((full.min(room) + 2.0 * ROOM) * k).round() as i32;
     let x = if edge == Edge::Left { wx } else { wx + ww - width };

@@ -717,6 +717,17 @@ fn save_items(app: AppHandle, items: Vec<Value>) -> Result<(), String> {
     write_field(&app, "items", Value::Array(items))
 }
 
+/// A key was carried to another place on the capsule: the item at `from` of the settings' list
+/// goes where the item at `to` is.
+#[tauri::command(async)]
+fn move_item(app: AppHandle, from: usize, to: usize) -> Result<(), String> {
+    change_settings(&app, |text| config::with_moved(text, from, to))?;
+    applog(&app, &format!("order: item {} moved to place {}", from + 1, to + 1));
+    reload_settings(&app);
+    let _ = app.emit("reload", ());
+    Ok(())
+}
+
 #[tauri::command(async)]
 fn installed_apps() -> Vec<apps::App> {
     let apps = apps::installed();
@@ -869,6 +880,10 @@ fn window_theme(theme: config::Theme) -> Option<tauri::Theme> {
 /// has no taskbar button, so it is put in front by force: a tap on the capsule, which never takes
 /// focus, gives the panel no right to change the active window.
 fn open_settings_window(app: &AppHandle) {
+    // One opening at a time: a second tap that comes while the window opens adds nothing, and two
+    // threads must not both find no window and make one each.
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let Ok(_turn) = ONE_AT_A_TIME.try_lock() else { return };
     if let Some(w) = app.get_webview_window("settings") {
         let _ = w.unminimize();
         let _ = w.show();
@@ -888,6 +903,9 @@ fn open_settings_window(app: &AppHandle) {
         .build();
     match built {
         Ok(w) => {
+            // Always in the middle of the screen: left to Windows, each new window lands a step
+            // further down and to the right of the last one
+            let _ = w.center();
             if let Ok(hwnd) = w.hwnd() {
                 let _ = win::bring_to_front(hwnd.0 as isize);
             }
@@ -1193,6 +1211,7 @@ fn main() {
             get_settings,
             set_pref,
             save_items,
+            move_item,
             installed_apps,
             pinned_apps,
             bundle_items,

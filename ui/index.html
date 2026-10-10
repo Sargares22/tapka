@@ -75,6 +75,14 @@
   .item.flash .key{transform:scale(.92);background:color-mix(in srgb,var(--accent) 28%,var(--key-hot));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
   .key img{display:block;width:24px;height:24px;object-fit:contain;pointer-events:none}
   .key svg{display:block;width:24px;height:24px;pointer-events:none}
+  /* A picture that would not read on its key: of one colour, it is drawn in the ink of the theme;
+     any other gets a plate of that ink (see legible) */
+  .key .sign{display:block;width:24px;height:24px;background:currentColor;mask:center/contain no-repeat;pointer-events:none}
+  .key.plate img{box-sizing:content-box;padding:4px;border-radius:9px;background:var(--ink-2)}
+  /* A key held and then moved is carried along the list to a new place: it stands out, the
+     others make room */
+  .item.carried{z-index:2}
+  .item.carried .key{transform:scale(1.12);background:var(--key-hot);box-shadow:inset 0 0 0 1.5px var(--accent),0 4px 10px rgba(0,0,0,.45)}
   /* The plus that opens the editor is not a key: a small quiet mark in the foot of the pill, like
      the bar of the handle at its head. The whole foot takes the press. */
   .item.add{flex:0 0 38px}
@@ -127,7 +135,7 @@
   const grip = document.getElementById('grip');
   const card = document.getElementById('card');
   const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
-  const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8, NOTE_MS = 2000, APPEAR_MS = 180, FLASH_MS = 140;
+  const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8, EDGE = 22, EDGE_STEP = 6, NOTE_MS = 2000, APPEAR_MS = 180, FLASH_MS = 140;
   let shown = [];
   let tablet = false;
   // A quiet click on a tap, if the settings ask for it
@@ -142,8 +150,41 @@
   const dark = matchMedia('(prefers-color-scheme: dark)');
   let theme = 'system';
   const paint = () => { document.documentElement.dataset.theme = theme === 'system' ? (dark.matches ? 'dark' : 'light') : theme; };
-  dark.addEventListener('change', paint);
+  dark.addEventListener('change', () => { paint(); redraw(); });
   const PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5.5v13M5.5 12h13"/></svg>';
+
+  // A picture that would be lost on its key, a white sign on a light key or a black one on a
+  // dark key, is made to read in any theme. A picture of one colour is drawn in the ink of the
+  // theme, like the built-in icons; any other gets a plate of that ink under it.
+  function legible(img) {
+    const key = img.parentElement, back = key && getComputedStyle(key).backgroundColor.match(/[0-9.]+/g);
+    if (!back) return;
+    // LOST is how close to the key's colour a dot is hard to see, MOST the share of such dots
+    const LOST = 90, MOST = 0.7;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 24;
+    let px;
+    try {
+      const paper = canvas.getContext('2d', { willReadFrequently: true });
+      paper.drawImage(img, 0, 0, 24, 24);
+      px = paper.getImageData(0, 0, 24, 24).data;
+    } catch (_) { return; }
+    let n = 0, lost = 0, lo = 255, hi = 0, colour = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 3] < 96) continue;
+      const [r, g, b] = [px[i], px[i + 1], px[i + 2]];
+      n++;
+      if (Math.hypot(r - back[0], g - back[1], b - back[2]) < LOST) lost++;
+      lo = Math.min(lo, r, g, b); hi = Math.max(hi, r, g, b);
+      colour = Math.max(colour, Math.max(r, g, b) - Math.min(r, g, b));
+    }
+    if (!n || lost < n * MOST) return;
+    if (hi - lo > 64 || colour > 40) return key.classList.add('plate');
+    const sign = document.createElement('span');
+    sign.className = 'sign';
+    sign.style.maskImage = `url("${img.src}")`;
+    img.replaceWith(sign);
+  }
 
   // One key per item: its picture if it has one, otherwise the first letter of the name. After
   // the items comes one more key, which opens the editor.
@@ -170,6 +211,7 @@
         key.innerHTML = it.glyph;
       } else if (it.icon) {
         const img = document.createElement('img');
+        img.onload = () => legible(img);
         img.src = it.icon;
         img.alt = it.name;
         key.append(img);
@@ -277,8 +319,9 @@
   // Presses on the keys. A press and release on the same item less than SLOP apart is a tap; Rust
   // runs the action. A finger or a pen that moves before LONG_PRESS_MS scrolls the list (the page
   // does it itself: touch-action is off so the gesture is never taken away mid-press). Held for
-  // LONG_PRESS_MS, the press shows the name label instead of running the action. The mouse wheel
-  // scrolls. The capsule is moved by its handle only.
+  // LONG_PRESS_MS, the press shows the name label instead of running the action; moved after
+  // that, the key is carried to another place among the keys and the release leaves it there. The
+  // mouse wheel scrolls. The capsule is moved by its handle only.
   let press = null;
   const lift = () => { for (const b of keys.querySelectorAll('.down')) b.classList.remove('down'); };
   const keyAt = i => keys.querySelector(`.item[data-i="${i}"]`);
@@ -301,11 +344,56 @@
       cardTimer = setTimeout(drop, LABEL_STAYS_MS);
     }, LONG_PRESS_MS);
   });
+  // Order: the carried key follows the pointer along the list, the keys it passes step aside, and
+  // near an end of the list the list scrolls on. `to` is where the key would land now.
+  const along = e => flat() ? e.clientX : e.clientY;
+  const scrolled = () => flat() ? list.scrollLeft : list.scrollTop;
+  function carry(p, e) {
+    const rows = [...list.children];
+    if (!p.carry) {
+      hideCard();
+      lift();
+      const row = rows[p.index];
+      p.carry = { row, from: p.index, to: p.index, starts: rows.map(r => flat() ? r.offsetLeft : r.offsetTop) };
+      row.classList.add('carried');
+    }
+    const c = p.carry, box = list.getBoundingClientRect();
+    const [near, far] = flat() ? [box.left, box.right] : [box.top, box.bottom];
+    const step = along(e) < near + EDGE ? -EDGE_STEP : along(e) > far - EDGE ? EDGE_STEP : 0;
+    if (flat()) list.scrollLeft += step; else list.scrollTop += step;
+    const moved = along(e) - (flat() ? p.x : p.y) + scrolled() - p.scroll;
+    const d = Math.max(c.starts[0] - c.starts[c.from], Math.min(c.starts[c.starts.length - 1] - c.starts[c.from], moved));
+    const at = c.starts[c.from] + d, size = flat() ? c.row.offsetWidth : c.row.offsetHeight;
+    const shift = px => flat() ? `translateX(${px}px)` : `translateY(${px}px)`;
+    c.row.style.transform = shift(d);
+    c.to = c.starts.reduce((best, start, i) => Math.abs(start - at) < Math.abs(c.starts[best] - at) ? i : best, c.from);
+    rows.forEach((r, i) => {
+      if (r === c.row) return;
+      const by = i > c.from && i <= c.to ? -size : i < c.from && i >= c.to ? size : 0;
+      r.style.transition = 'transform .12s';
+      r.style.transform = by ? shift(by) : '';
+    });
+  }
+  // The carry is over. A key that changed places stays where it was put until Rust has saved the
+  // new order and the keys are drawn again; otherwise everything goes back.
+  function settle(c, keep) {
+    if (keep) {
+      c.row.style.transition = 'transform .12s';
+      c.row.style.transform = (flat() ? 'translateX(' : 'translateY(') + (c.starts[c.to] - c.starts[c.from]) + 'px)';
+      return;
+    }
+    for (const r of list.children) r.style.transform = r.style.transition = '';
+    c.row.classList.remove('carried');
+  }
   window.addEventListener('pointermove', e => {
-    if (!press || press.id !== e.pointerId || press.mouse) return;
+    if (!press || press.id !== e.pointerId) return;
     const p = press;
+    if (p.carry) return carry(p, e);
     if (!p.scrolling && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP) return;
-    // A finger that moves on after the label came up is scrolling: the label goes
+    // A key that moves after its label came up is being carried to another place
+    if (p.long && !p.scrolling && p.item && !p.item.add) return carry(p, e);
+    if (p.mouse) return;
+    // A finger that moves before that is scrolling
     p.scrolling = true;
     hideCard();
     lift();
@@ -320,6 +408,12 @@
     press = null;
     lift();
     hideCard();
+    if (p.carry) {
+      const c = p.carry, moved = c.to !== c.from;
+      settle(c, moved);
+      // Rust is told the places in the settings file; its reload draws the keys in the new order
+      if (moved) invoke('move_item', { from: shown[c.from].at, to: shown[c.to].at }).catch(() => redraw());
+    }
     const tap = !p.scrolling && !p.long && p.index >= 0 && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP && keyAt(p.index);
     if (tap) {
       flash(keyAt(p.index));
@@ -332,7 +426,7 @@
   }
   window.addEventListener('pointerup', release);
   // The press was taken away without a release: nothing stays pressed and no label stays open
-  const drop = () => { press = null; lift(); hideCard(); afterPress(); };
+  const drop = () => { if (press && press.carry) settle(press.carry, false); press = null; lift(); hideCard(); afterPress(); };
   window.addEventListener('pointercancel', drop);
   keys.addEventListener('lostpointercapture', drop);
 
@@ -343,7 +437,7 @@
   let hot = null, afterTouch = false;
   function hover(at) {
     if (!at) afterTouch = false;
-    if (!at && press && press.long) drop();
+    if (!at && press && press.long && !press.carry) drop();
     const el = at && !afterTouch && !press ? document.elementFromPoint(at[0], at[1]) : null;
     const b = el ? el.closest('.item') : null;
     grip.classList.toggle('hot', !!el && !!el.closest('#grip'));

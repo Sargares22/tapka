@@ -453,6 +453,89 @@ test('story 28: a tap flashes its key for a moment; a scroll or a long press doe
   assert.deepEqual(fb.afterLong, [false, false, false, false, false]);
 });
 
+// A key held and then moved is carried to another place among the keys
+const carrying = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  const keys = () => [...document.querySelectorAll('#list .item')];
+  const at = (type, y, pointerType = 'touch') => new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType, clientX: 10, clientY: y });
+  const moves = () => window.__calls.filter(c => c[0] === 'move_item').map(c => [c[1].from, c[1].to]);
+  const taps = () => window.__calls.filter(c => c[0] === 'tap').length;
+  // Where each key is being sent, whatever part of the way its transition has gone
+  const shifts = () => keys().map(b => Math.round(parseFloat((b.style.transform.match(/-?[0-9.]+/) || [0])[0])));
+  await sleep(50);
+  const y = i => { const r = keys()[i].getBoundingClientRect(); return r.top + r.height / 2; };
+  const [y0, y1, y2] = [y(0), y(1), y(2)];
+  // Held past the long press, then moved two keys down: the key follows, the two it passed step up
+  keys()[0].dispatchEvent(at('pointerdown', y0)); await sleep(450);
+  window.dispatchEvent(at('pointermove', y0 + 30)); out.lifted = keys()[0].classList.contains('carried'); out.label = !document.getElementById('card').hidden;
+  window.dispatchEvent(at('pointermove', y2)); await sleep(200);
+  out.during = shifts();
+  window.dispatchEvent(at('pointerup', y2)); await sleep(200);
+  out.moved = moves(); out.tapsAfterCarry = taps(); out.kept = shifts();
+  // Rust saved the order and says so: the keys are drawn anew, nothing is left shifted
+  window.__view = { ...window.__view, items: [1, 2, 0, 3, 4].map(i => window.__view.items[i]) };
+  window.__on.reload(); await sleep(50);
+  out.after = shifts(); out.carriedAfter = keys().some(b => b.classList.contains('carried'));
+  // Put back where it was taken from: nothing is saved and nothing stays shifted
+  keys()[1].dispatchEvent(at('pointerdown', y1)); await sleep(450);
+  window.dispatchEvent(at('pointermove', y1 + 30)); window.dispatchEvent(at('pointermove', y1 + 4)); window.dispatchEvent(at('pointerup', y1 + 4)); await sleep(200);
+  out.movedBack = moves().length; out.backShifts = shifts();
+  // The plus is not carried, and a move before the long press still scrolls and carries nothing
+  const plus = document.querySelector('.item.add'), py = plus.getBoundingClientRect().top + 5;
+  plus.dispatchEvent(at('pointerdown', py)); await sleep(450); window.dispatchEvent(at('pointermove', py - 60)); out.plusCarried = !!document.querySelector('.carried'); window.dispatchEvent(at('pointerup', py - 60));
+  keys()[0].dispatchEvent(at('pointerdown', y0)); window.dispatchEvent(at('pointermove', y0 + 60)); out.earlyCarried = !!document.querySelector('.carried'); window.dispatchEvent(at('pointerup', y0 + 60));
+  out.movedInAll = moves().length;
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const cr = found(renderedDom(items, carrying, 5000));
+
+test('a key held and then moved is carried to another place, and the order goes to Rust', () => {
+  assert.equal(cr.lifted, true);
+  assert.equal(cr.label, false);
+  // The carried key is two cells down, the two it passed are one cell up, the rest stand still
+  assert.deepEqual(cr.during, [108, -54, -54, 0, 0]);
+  assert.deepEqual(cr.moved, [[0, 2]]);
+  assert.equal(cr.tapsAfterCarry, 0);
+  assert.deepEqual(cr.kept, [108, -54, -54, 0, 0]);
+  assert.deepEqual(cr.after, [0, 0, 0, 0, 0]);
+  assert.equal(cr.carriedAfter, false);
+  assert.equal(cr.movedBack, 1);
+  assert.deepEqual(cr.backShifts, [0, 0, 0, 0, 0]);
+  assert.equal(cr.plusCarried, false);
+  assert.equal(cr.earlyCarried, false);
+  assert.equal(cr.movedInAll, 1);
+});
+
+// Pictures that would be lost on their keys are made to read in either theme
+const reading = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  // A sign of one colour on a clear ground, and a picture of two colours
+  const sign = colour => { const c = document.createElement('canvas'); c.width = c.height = 24; const p = c.getContext('2d'); p.fillStyle = colour; p.fillRect(6, 6, 12, 12); return c.toDataURL(); };
+  const flag = (a, b) => { const c = document.createElement('canvas'); c.width = c.height = 24; const p = c.getContext('2d'); p.fillStyle = a; p.fillRect(0, 0, 24, 12); p.fillStyle = b; p.fillRect(0, 12, 24, 12); return c.toDataURL(); };
+  const pictures = [sign('#ffffff'), sign('#101010'), flag('#d97757', '#ffffff'), flag('#ffffff', '#fff2a8')];
+  const look = async theme => {
+    window.__view = { ...window.__view, theme, items: pictures.map((icon, at) => ({ at, name: 'n' + at, icon })) };
+    window.__on.reload(); await sleep(300);
+    return [...document.querySelectorAll('#list .key')].map(k => k.querySelector('.sign') ? 'ink' : k.classList.contains('plate') ? 'plate' : 'as is');
+  };
+  out.light = await look('light');
+  out.dark = await look('dark');
+  const s = document.querySelector('#list .sign');
+  out.inkOfTheme = s ? getComputedStyle(s).backgroundColor : null;
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const rd = found(renderedDom(items, reading, 3000));
+
+test('a picture that would be lost on its key is drawn in the ink of the theme or gets a plate', () => {
+  // On light keys the white sign turns to ink and the pale picture of two colours gets a plate
+  assert.deepEqual(rd.light, ['ink', 'as is', 'as is', 'plate']);
+  // On dark keys it is the black sign that turns; the rest read as they are
+  assert.deepEqual(rd.dark, ['as is', 'ink', 'as is', 'as is']);
+  assert.equal(rd.inkOfTheme, 'rgb(230, 232, 238)');
+});
+
 test('story 28: the click sounds only when switched on, and the page works without WebAudio', () => {
   assert.equal(fb.tonesOff, 0);
   assert.equal(fb.tonesOn.length, 1);
