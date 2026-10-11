@@ -45,7 +45,7 @@ To remove it: Windows Settings → Installed apps. Antivirus nervous because the
 - **Add without typing.** Programs pinned to the taskbar, Windows Settings pages and ready sets go in with a tap.
 - **Your look.** Dark, light or system theme, any accent, three sizes, Russian and English. Updates are quiet, once per start, and can be switched off.
 
-Ready-made Windows actions: snip an area, paste, copy, undo, redo, select all, voice typing, task view, show desktop, File Explorer, Settings, on-screen keyboard, clipboard history, emoji, louder, quieter, mute, play/pause, next track, hold Shift, Ctrl, Alt or Space.
+Ready-made Windows actions: snip an area, paste, copy, undo, redo, select all, voice typing, task view, show desktop, File Explorer, Settings, on-screen keyboard, clipboard history, emoji, louder, quieter, mute, play/pause, next track, hold Shift, Ctrl, Alt or Space, Esc, the four arrows, Space, full screen.
 
 ## Your own keys
 
@@ -59,7 +59,7 @@ Tap the **+** on the capsule, or open the settings from the tray icon.
 - **Windows action:** one of the ready-made ones, or a Settings page such as Bluetooth, Wi-Fi, sound, display or Windows Update.
 - **Website or file:** type an address, or choose a file or folder.
 - **Keyboard shortcut:** press it, or build it with the Ctrl, Shift, Alt and Win buttons.
-- **Ready set:** several keys at once: Tablet, Drawing or Text. A set can go to one program right away; keys already in the list are not added twice.
+- **Ready set:** several keys at once: Tablet, Drawing, Text or Video. A set can go to one program right away; keys already in the list are not added twice. *Save my keys…* writes your keys, all or those of one program, to a `.tapka` file to share; *Set from a file…* shows such a file as one more set and adds its keys to yours.
 
 Drag keys by the dots to reorder, or right on the capsule: hold a key until its label shows, then carry it to its new place. A tap on a row opens the key's card: name, hint, icon, where to show, and *Remove*, with an Undo.
 

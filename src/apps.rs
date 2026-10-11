@@ -99,6 +99,23 @@ fn opens(target: &str) -> bool {
     }
 }
 
+/// Whether what an `open` item from somebody else's file opens is on this machine: a file or a
+/// folder on a drive, or an app of the Start menu's list. An address (a site, `ms-settings:`, any
+/// other link) counts as there. So does what cannot be told without going out for it: a network
+/// path, which is never touched for a file that came from anywhere, and a bare name Windows
+/// finds by itself.
+pub fn found(target: &str) -> bool {
+    let target = target.trim();
+    let lower = target.to_lowercase();
+    if lower.starts_with("shell:appsfolder\\") {
+        // The shell needs COM on this thread; a thread that already has it answers with an error
+        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        return opens(target);
+    }
+    let on_drive = matches!(lower.as_bytes(), [drive, b':', b'\\' | b'/', ..] if drive.is_ascii_lowercase());
+    !on_drive || std::path::Path::new(target).exists()
+}
+
 /// The shortcuts pinned to the taskbar of this user, by name, each with what it starts. A shortcut
 /// whose target cannot be told is left out.
 pub fn pinned() -> Vec<App> {
@@ -199,6 +216,23 @@ mod tests {
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
         assert!(opens(r"shell:AppsFolder\Microsoft.Windows.Explorer"));
         assert!(!opens(r"shell:AppsFolder\Vendor.NoSuchPaint_abc123xyz!App"));
+    }
+
+    #[test]
+    fn a_target_from_a_file_is_found_only_when_it_is_on_this_machine() {
+        let windir = std::env::var("WINDIR").unwrap();
+        // A file, a folder and an app that are here
+        assert!(found(&format!("{windir}\\explorer.exe")));
+        assert!(found(&format!(" {windir} ")));
+        assert!(found(r"shell:AppsFolder\Microsoft.Windows.Explorer"));
+        // The same that are not
+        assert!(!found(r"C:\no\such\paint.exe"));
+        assert!(!found("c:/no/such/folder"));
+        assert!(!found(r"shell:AppsFolder\Vendor.NoSuchPaint_abc123xyz!App"));
+        // Addresses count as found; a network path is not gone to
+        for address in ["https://example.com", "ms-settings:sound", "ms-settings:", "chat://new", "notepad", r"\\no-such-host\share\a.txt"] {
+            assert!(found(address), "{address}");
+        }
     }
 
     #[test]

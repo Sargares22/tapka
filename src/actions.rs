@@ -64,6 +64,13 @@ pub fn capsule_returns(snip: Snip, hidden_ms: u64) -> bool {
     }
 }
 
+/// Whether the hide numbered `mine` may bring the capsule back: only while it is the latest hide,
+/// `latest`, and the capsule is still hidden for a snapshot. A snapshot that failed or ran out
+/// while a later one keeps the capsule hidden leaves it hidden.
+pub fn ends_hide(latest: u32, mine: u32, snapping: bool) -> bool {
+    snapping && latest == mine
+}
+
 /// Where the keyboard puts the capsule: on screen, unless the user asked to see it only in tablet
 /// mode and a keyboard is attached. The tray and a second launch may then say otherwise, until
 /// the keyboard is attached or detached again.
@@ -134,10 +141,23 @@ pub fn steps_for(action: &Action, running: Running) -> Vec<Step> {
 /// pressed on the device afterwards.
 pub const HOLD_IDLE_MS: u64 = 20_000;
 
+/// Why a tap did not do what its key is for: what the capsule says beside the key.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Failure {
+    /// Windows did not take every key event sent.
+    Keys,
+    /// The program, file, folder or address did not open.
+    Open,
+    /// The keys were sent, but the active window belongs to a program with rights above the
+    /// panel's, and Windows may drop such keys without a word.
+    Admin,
+}
+
 /// The keys `hold` items keep pressed, and when the capsule was last tapped. Every change is
 /// sent to the system through `send(vk, up)` before the method returns, so whoever holds this
 /// under a lock sends the key under the same lock: a tap and a let-go on two threads cannot
-/// leave a key down in Windows that is no longer counted here, or the other way round.
+/// leave a key down in Windows that is no longer counted here, or the other way round. `send`
+/// says whether the system took the key; a key it refused stays counted as it was.
 #[derive(Debug, Default)]
 pub struct Holds {
     /// Virtual-key codes, in the order they were pressed.
@@ -156,42 +176,56 @@ impl Holds {
     }
 
     /// A tap on a `hold` item: its key is pressed if it was up and let go if it was held.
-    /// Returns whether the key is held now.
-    pub fn toggle(&mut self, vk: u16, mut send: impl FnMut(u16, bool)) -> bool {
-        let down = match self.keys.iter().position(|&k| k == vk) {
+    /// Returns whether the key is held now, or `None` if the system refused it: then nothing has
+    /// changed.
+    pub fn toggle(&mut self, vk: u16, mut send: impl FnMut(u16, bool) -> bool) -> Option<bool> {
+        let at = self.keys.iter().position(|&k| k == vk);
+        if !send(vk, at.is_some()) {
+            return None;
+        }
+        match at {
             Some(at) => {
                 self.keys.remove(at);
-                false
+                Some(false)
             }
             None => {
                 self.keys.push(vk);
-                true
+                Some(true)
             }
-        };
-        send(vk, !down);
-        down
+        }
     }
 
     /// Lets go of every held key once HOLD_IDLE_MS have passed since the last tap at `now`.
-    /// Returns the keys let go.
-    pub fn expire(&mut self, now: Instant, send: impl FnMut(u16, bool)) -> Vec<u16> {
+    /// Returns the keys let go. A key the system would not let go of is tried again after the
+    /// same wait.
+    pub fn expire(&mut self, now: Instant, send: impl FnMut(u16, bool) -> bool) -> Vec<u16> {
         let idle = self.last_tap.is_none_or(|tap| now.saturating_duration_since(tap) >= Duration::from_millis(HOLD_IDLE_MS));
-        if idle {
-            self.release_all(send)
-        } else {
-            Vec::new()
+        if !idle {
+            return Vec::new();
         }
+        let gone = self.release_all(send);
+        if !self.keys.is_empty() {
+            self.last_tap = Some(now);
+        }
+        gone
     }
 
     /// Lets go of every held key, the last pressed first: the active program changed, the capsule
-    /// went off the screen, or the panel is quitting. Returns the keys let go.
-    pub fn release_all(&mut self, mut send: impl FnMut(u16, bool)) -> Vec<u16> {
-        let mut keys = std::mem::take(&mut self.keys);
-        keys.reverse();
-        for &vk in &keys {
-            send(vk, true);
-        }
-        keys
+    /// went off the screen, or the panel is quitting. Returns the keys let go; a key the system
+    /// would not let go of stays held.
+    pub fn release_all(&mut self, mut send: impl FnMut(u16, bool) -> bool) -> Vec<u16> {
+        let held = self.keys.clone();
+        let gone: Vec<u16> = held.into_iter().rev().filter(|&vk| send(vk, true)).collect();
+        self.keys.retain(|vk| !gone.contains(vk));
+        gone
+    }
+
+    /// The capsule is about to fold: every held key is let go, as in `release_all`. Returns the
+    /// keys let go and whether the capsule may fold: with a key the system would not let go of it
+    /// stays open, where the key's item is lit and can be tapped.
+    pub fn release_to_fold(&mut self, send: impl FnMut(u16, bool) -> bool) -> (Vec<u16>, bool) {
+        let gone = self.release_all(send);
+        (gone, self.keys.is_empty())
     }
 }
 
@@ -205,6 +239,16 @@ pub fn without_held(vks: &[u16], held: &[u16]) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_snapshot_ends_its_own_hide_and_no_other() {
+        // The only snapshot: its wait or its failed keys bring the capsule back, once
+        assert!(ends_hide(1, 1, true));
+        assert!(!ends_hide(1, 1, false));
+        // A second one hid the capsule meanwhile: the first leaves it hidden, the second ends it
+        assert!(!ends_hide(2, 1, true));
+        assert!(ends_hide(2, 2, true));
+    }
 
     #[test]
     fn a_running_program_behaves_like_its_taskbar_button() {
@@ -288,14 +332,18 @@ mod tests {
         let mut sent = Vec::new();
         let t = Instant::now();
         holds.touch(t);
-        assert!(holds.toggle(VK_SHIFT, |vk, up| sent.push((vk, up))));
+        let mut send = |vk, up| {
+            sent.push((vk, up));
+            true
+        };
+        assert_eq!(holds.toggle(VK_SHIFT, &mut send), Some(true));
         // Two at once: Shift and Ctrl
         holds.touch(t);
-        assert!(holds.toggle(VK_CONTROL, |vk, up| sent.push((vk, up))));
+        assert_eq!(holds.toggle(VK_CONTROL, &mut send), Some(true));
         assert_eq!(holds.held(), [VK_SHIFT, VK_CONTROL]);
         // The second tap on Shift lets it go; Ctrl stays
         holds.touch(t);
-        assert!(!holds.toggle(VK_SHIFT, |vk, up| sent.push((vk, up))));
+        assert_eq!(holds.toggle(VK_SHIFT, &mut send), Some(false));
         assert_eq!(holds.held(), [VK_CONTROL]);
         assert_eq!(sent, [(VK_SHIFT, false), (VK_CONTROL, false), (VK_SHIFT, true)]);
         // A hotkey sent meanwhile goes without the held Ctrl, which stays down
@@ -311,15 +359,18 @@ mod tests {
         let at = |ms| t + Duration::from_millis(ms);
         let mut ups = Vec::new();
         holds.touch(t);
-        holds.toggle(0x10, |_, _| {});
-        holds.toggle(0x12, |_, _| {});
-        assert!(holds.expire(at(19_999), |vk, _| ups.push(vk)).is_empty());
+        holds.toggle(0x10, |_, _| true);
+        holds.toggle(0x12, |_, _| true);
+        assert!(holds.expire(at(19_999), |_, _| panic!("too early")).is_empty());
         // Any tap on the capsule starts the wait over
         holds.touch(at(15_000));
-        assert!(holds.expire(at(34_999), |vk, _| ups.push(vk)).is_empty());
-        assert!(ups.is_empty());
+        assert!(holds.expire(at(34_999), |_, _| panic!("too early")).is_empty());
         // Then they go, the last pressed first, and nothing is left to let go
-        assert_eq!(holds.expire(at(35_000), |vk, up| ups.push(if up { vk } else { 0 })), [0x12, 0x10]);
+        let gone = holds.expire(at(35_000), |vk, up| {
+            ups.push(if up { vk } else { 0 });
+            true
+        });
+        assert_eq!(gone, [0x12, 0x10]);
         assert_eq!(ups, [0x12, 0x10]);
         assert!(holds.held().is_empty());
         assert!(holds.expire(at(60_000), |_, _| panic!("nothing is held")).is_empty());
@@ -330,14 +381,70 @@ mod tests {
         let mut holds = Holds::default();
         let mut sent = Vec::new();
         holds.touch(Instant::now());
-        holds.toggle(0x11, |_, _| {});
-        holds.toggle(0x20, |_, _| {});
-        assert_eq!(holds.release_all(|vk, up| sent.push((vk, up))), [0x20, 0x11]);
+        holds.toggle(0x11, |_, _| true);
+        holds.toggle(0x20, |_, _| true);
+        let gone = holds.release_all(|vk, up| {
+            sent.push((vk, up));
+            true
+        });
+        assert_eq!(gone, [0x20, 0x11]);
         assert_eq!(sent, [(0x20, true), (0x11, true)]);
         assert!(holds.held().is_empty());
         assert!(holds.release_all(|_, _| panic!("nothing is held")).is_empty());
         // Pressed again after that, a key is held as before
-        assert!(holds.toggle(0x11, |_, _| {}));
+        assert_eq!(holds.toggle(0x11, |_, _| true), Some(true));
+    }
+
+    #[test]
+    fn a_key_windows_refused_is_not_counted_as_held() {
+        let mut holds = Holds::default();
+        assert_eq!(holds.toggle(0x10, |_, _| false), None);
+        assert!(holds.held().is_empty());
+        // The next tap presses it again: it does not let go of a key that never went down
+        let mut sent = Vec::new();
+        holds.toggle(0x10, |vk, up| {
+            sent.push((vk, up));
+            true
+        });
+        assert_eq!(sent, [(0x10, false)]);
+        assert_eq!(holds.held(), [0x10]);
+    }
+
+    #[test]
+    fn a_key_windows_would_not_let_go_of_stays_held() {
+        let mut holds = Holds::default();
+        let t = Instant::now();
+        let at = |ms| t + Duration::from_millis(ms);
+        holds.touch(t);
+        for vk in [0x10, 0x11, 0x12] {
+            holds.toggle(vk, |_, _| true);
+        }
+        // By a tap on its item
+        assert_eq!(holds.toggle(0x11, |_, _| false), None);
+        assert_eq!(holds.held(), [0x10, 0x11, 0x12]);
+        // All at once: the keys that went up are forgotten, the one that did not is kept
+        assert_eq!(holds.release_all(|vk, _| vk != 0x11), [0x12, 0x10]);
+        assert_eq!(holds.held(), [0x11]);
+        // By the wait running out; it is tried again only after the same wait
+        assert!(holds.expire(at(20_000), |_, _| false).is_empty());
+        assert_eq!(holds.held(), [0x11]);
+        assert!(holds.expire(at(39_999), |_, _| panic!("too early")).is_empty());
+        assert_eq!(holds.expire(at(40_000), |_, _| true), [0x11]);
+        assert!(holds.held().is_empty());
+    }
+
+    #[test]
+    fn a_key_windows_would_not_let_go_of_keeps_the_capsule_open() {
+        let mut holds = Holds::default();
+        holds.touch(Instant::now());
+        holds.toggle(0x10, |_, _| true);
+        holds.toggle(0x11, |_, _| true);
+        // Ctrl would not come up: the capsule does not fold, and Ctrl is still counted as held
+        assert_eq!(holds.release_to_fold(|vk, _| vk != 0x11), (vec![0x10], false));
+        assert_eq!(holds.held(), [0x11]);
+        // The next try lets it go, and the capsule folds; with nothing held it folds at once
+        assert_eq!(holds.release_to_fold(|_, _| true), (vec![0x11], true));
+        assert_eq!(holds.release_to_fold(|_, _| panic!("nothing is held")), (vec![], true));
     }
 
     #[test]
@@ -355,6 +462,7 @@ mod tests {
                 if !up {
                     down.push(vk);
                 }
+                true
             }
         };
         let taps = {

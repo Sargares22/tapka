@@ -43,7 +43,7 @@ for (const [theme, accent] of [['dark', '#8ab4ff'], ['light', '#ff8a3d']]) {
   // The capsule's own window is 348 px wide: the strip and the room for the label
   const box = '<style>html,body{width:348px!important;height:340px!important}body{position:relative}</style>';
   const hover = "<script>setTimeout(()=>{const r=document.querySelector('.item').getBoundingClientRect();window.__on.hover({payload:[r.left+r.width/2,r.top+r.height/2]})},100)</script>";
-  shoot('index.html', 'capsule-' + theme, '348,340', { get_view: { items, cell: 54, tablet: false, edge: 'right', theme, accent, add: ['Add', 'Open the item editor'] } }, box + hover);
+  shoot('index.html', 'capsule-' + theme, '348,340', { get_view: { items, cell: 54, tablet: false, edge: 'right', theme, accent, add: ['Add', 'Settings and folding the capsule'], gear: { name: 'Settings', hint: 'Open the settings window', glyph: glyphs.gear }, fold: { name: 'Fold', hint: 'Fold the capsule into one key', glyph: glyphs.right }, unfold: glyphs.left } }, box + hover);
   const settings = {
     items: sample.map(raw => ({ raw, icon: null, glyph: glyphs[raw.icon] || null, problem: null })),
     scale: 1, edge: 'right', theme, accent, lang: 'en', russian: false, autostart: false, updates: true, tablet_only: false, version: '0.0.0', error: null, intro: false,

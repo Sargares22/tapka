@@ -17,14 +17,15 @@ const browser = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
 // Returns a page's DOM after its scripts have run for `ms` of virtual time. The page is given a
 // stand-in for Tauri whose `get_view` answers with window.__view, `get_settings` with
 // window.__settings, `running_programs` with window.__programs, `pinned_apps` with window.__pinned
-// and `bundle_items` with what window.__bundle makes of its arguments; every call is kept in
+// and `bundle_items` with what window.__bundle makes of its arguments, `open_key_set` and
+// `key_set_items` with what window.__keySet and window.__keySetItems make; every call is kept in
 // window.__calls and the page's event listeners in window.__on, by event name.
 // `script` runs after the page's own script and may leave its findings in the DOM.
 function renderedDom(items, script = '', ms = 4000, page = 'index.html', settings = null) {
   assert.ok(browser, 'Google Chrome not found');
   const work = mkdtempSync(join(tmpdir(), 'tapka-check-'));
   try {
-    const stub = `<script>window.__calls=[];window.__on={};window.__view={items:${JSON.stringify(items)},cell:54,tablet:false,edge:'right',theme:'dark',accent:'#8ab4ff',add:['Добавить','Открыть редактор пунктов']};window.__settings=${JSON.stringify(settings)};window.__programs=[{name:'Paint Studio',exe:'paint.exe'},{name:'Sketch',exe:'sketch.exe'}];window.__TAURI__={core:{invoke:async(c,a)=>{window.__calls.push([c,a]);return c==='get_view'?window.__view:c==='get_settings'?JSON.parse(JSON.stringify(window.__settings)):c==='running_programs'?window.__programs:c==='pinned_apps'?window.__pinned:c==='bundle_items'?window.__bundle?.(a):null}},event:{listen(n,cb){window.__on[n]=cb}}}</script>`;
+    const stub = `<script>window.__calls=[];window.__on={};window.__view={items:${JSON.stringify(items)},cell:54,tablet:false,edge:'right',theme:'dark',accent:'#8ab4ff',add:['Добавить','Настройки и сворачивание капсулы'],gear:{name:'Настройки',hint:'Открыть окно настроек',glyph:'<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M4 4h16"/></svg>'},fold:{name:'Свернуть',hint:'Свернуть капсулу в одну клавишу',glyph:'<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M4 12h16"/></svg>'},unfold:'<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M20 12H4"/></svg>'};window.__settings=${JSON.stringify(settings)};window.__programs=[{name:'Paint Studio',exe:'paint.exe'},{name:'Sketch',exe:'sketch.exe'}];window.__TAURI__={core:{invoke:async(c,a)=>{window.__calls.push([c,a]);return c==='get_view'?window.__view:c==='get_settings'?JSON.parse(JSON.stringify(window.__settings)):c==='running_programs'?window.__programs:c==='pinned_apps'?window.__pinned:c==='bundle_items'?window.__bundle?.(a):c==='open_key_set'?window.__keySet():c==='key_set_items'?window.__keySetItems(a):c==='save_key_set'?3:null}},event:{listen(n,cb){window.__on[n]=cb}}}</script>`;
     const html = readFileSync(join(root, 'ui', page), 'utf8')
       .replace('<head>', '<head>' + stub)
       .replace('</body>', `<script>${script}</script></body>`);
@@ -114,12 +115,14 @@ const gestures = `(async () => {
   const lit = () => [...document.querySelectorAll('.item')].map(el => el.classList.contains('live'));
   window.__on.marks({ payload: [[false, false], [true, true], [false, false], [true, false], [false, false]] }); out.marked = marks(); out.live = lit();
   window.__on.marks({ payload: [[false, false], [false, false], [false, false], [true, false], [false, false]] }); out.unmarked = marks(); out.unlive = lit();
-  // The last key is not an item: a tap on it asks for the editor, with no index
+  // The last key is not an item: it has its label, and a tap on it runs nothing and opens the
+  // two signs of the foot
   const all = document.querySelectorAll('.item'), plus = all[all.length - 1];
   out.plusLast = plus.classList.contains('add') && all.length === 6;
+  away(); over(plus); await sleep(350); out.plusLabel = card(); away();
+  const tapsBefore = taps();
   fire(plus, 'pointerdown', 'touch'); fire(plus, 'pointerup', 'touch');
-  out.plusTap = window.__calls.filter(c => c[0] === 'tap').pop()[1].index;
-  away(); over(plus); await sleep(350); out.plusLabel = card();
+  out.plusTap = [taps() - tapsBefore, window.__calls.filter(c => c[0] === 'foot').pop()[1].open];
   // The settings change the theme and the accent; the page follows at the next reload
   out.themeBefore = document.documentElement.dataset.theme;
   window.__view = { ...window.__view, theme: 'light', accent: '#ff8800' }; window.__on.reload(); await sleep(50);
@@ -211,10 +214,10 @@ test('a built-in icon is drawn inline, in the ink of the theme', () => {
   assert.match(buttons[4], /^<svg viewBox="0 0 24 24" stroke="currentColor">/);
 });
 
-test('the last key is the plus: it opens the editor and is not one of the items', () => {
+test('the last key is the plus: it opens the signs and is not one of the items', () => {
   assert.equal((dom.match(/<button class="item add"/g) || []).length, 1);
   assert.equal(seen.plusLast, true);
-  assert.equal(seen.plusTap, null);
+  assert.deepEqual(seen.plusTap, [0, true]);
   assert.equal(seen.plusLabel, 'Добавить');
 });
 
@@ -239,8 +242,9 @@ const switching = `(async () => {
   const names = () => [...document.querySelectorAll('#list .item')].map(b => b.textContent);
   const card = () => { const c = document.getElementById('card'); return c.hidden ? null : c.querySelector('.c-title').textContent; };
   const fire = (el, type) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: 10, clientY: 10 }));
-  // As short as the real window makes a capsule of four keys and more: the list scrolls
-  document.getElementById('pill').style.height = '260px';
+  // Short enough for the list of four keys to scroll, and long enough for the third key to show
+  // whole while the two signs are up
+  document.getElementById('pill').style.height = '296px';
   await sleep(50);
   out.before = names();
   list.scrollTop = 40; out.scrolledTo = list.scrollTop;
@@ -267,7 +271,7 @@ const switching = `(async () => {
   window.__on.set({ payload: null }); await sleep(30);
   out.after = names(); out.noteAfter = card();
   // The program comes to the front while a finger holds the plus: nothing is redrawn under it, the
-  // held key keeps its label, the release still opens the editor, and then the keys change
+  // held key keeps its label, and after the release the keys change
   const plus = () => document.querySelector('.item.add');
   plus().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 2, pointerType: 'touch', clientX: 10, clientY: 10 }));
   await sleep(450); out.heldLabel = card();
@@ -284,7 +288,7 @@ const switching = `(async () => {
   out.shortHeld = names();
   window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 3, pointerType: 'touch', clientX: 10, clientY: 10 }));
   await sleep(30);
-  out.shortTap = window.__calls.filter(c => c[0] === 'tap').pop()[1].index;
+  out.shortTap = window.__calls.filter(c => c[0] === 'foot').length;
   out.afterRelease = names();
   // The program comes to the front and a finger lands on a key while Rust is still answering:
   // the answer waits for the release, and the release taps the key under the finger, not the
@@ -333,7 +337,7 @@ test('story 26: the keys do not change under a held finger; the release taps the
   assert.equal(sw.heldLabelAfter, 'Добавить');
   // A short press on the plus while the program leaves: the plus is tapped, then the keys change
   assert.deepEqual(sw.shortHeld, ['В', 'В', 'P', 'P', 'В', 'В']);
-  assert.equal(sw.shortTap, null);
+  assert.equal(sw.shortTap, 1);
   assert.equal(sw.afterRelease.length, 4);
   // A press that lands while the new set is on its way: nothing changes under the pen, the
   // release taps the key it was on (the third key for all programs, at 3 in the file), then the
@@ -397,6 +401,312 @@ test('story 27: a hold item is lit after a tap and goes out after the second', (
   assert.deepEqual(held.afterPaste, [false, true, false, true]);
   assert.deepEqual(held.afterSecondTap, [false, false, false, true]);
   assert.deepEqual(held.afterLetGo, [false, false, false, false]);
+});
+
+// ---------- a key that did not work
+// Rust says which item's action failed and gives the two lines to show (`failed`); here the
+// stand-in for Rust answers a tap with them, in Russian and in English, as Rust would.
+const failingScript = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  const answers = [];
+  const real = window.__TAURI__.core.invoke;
+  window.__TAURI__.core.invoke = async (c, a) => {
+    if (c === 'tap' && answers.length) window.__on.failed({ payload: { at: a.index, ...answers.shift() } });
+    return real(c, a);
+  };
+  const label = () => { const c = document.getElementById('card'); return c.hidden ? null : c.querySelector('.c-title').textContent + '|' + c.querySelector('.c-sub').textContent; };
+  const mid = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+  const beside = b => Math.abs(mid(document.getElementById('card')) - mid(b)) < 0.5;
+  const fire = (el, type) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: 10, clientY: 10 }));
+  await sleep(50);
+  const keys = document.querySelectorAll('#list .item');
+  // A tap whose keys Windows refused: the words come up beside the tapped key
+  answers.push({ title: 'Не сработало', why: 'Windows не приняла нажатие' });
+  fire(keys[1], 'pointerdown'); fire(keys[1], 'pointerup'); await sleep(30);
+  out.ru = label(); out.ruBeside = beside(keys[1]);
+  out.region = window.__calls.filter(c => c[0] === 'card').pop()[1].open;
+  // Two seconds on, another key fails (a program that took its time not to open): its words
+  // take the place of the first, and stay their own two and a half seconds
+  await sleep(2000); out.at2s = label();
+  window.__on.failed({ payload: { at: 3, title: "Didn't work", why: 'This window runs as administrator' } });
+  out.en = label(); out.enBeside = beside(keys[3]);
+  await sleep(600); out.pastFirst = label();
+  await sleep(1800); out.at2400 = label();
+  await sleep(200); out.at2600 = label();
+  out.regionClosed = window.__calls.filter(c => c[0] === 'card').pop()[1].open;
+  // A failure that arrives while a key is held waits for the release
+  fire(keys[2], 'pointerdown');
+  window.__on.failed({ payload: { at: 2, title: 'Не сработало', why: 'Не открылось' } });
+  out.whileHeld = label();
+  fire(keys[2], 'pointerup'); out.afterRelease = label(); out.afterReleaseBeside = beside(keys[2]);
+  // The next press closes the words, and a long press shows the key's own label as before
+  fire(keys[0], 'pointerdown'); out.nextPress = label();
+  await sleep(450); out.name = label();
+  fire(keys[0], 'pointerup'); out.nameGone = label();
+  // An item that is not on the capsule now has no key to speak beside
+  window.__on.failed({ payload: { at: 9, title: 'Не сработало', why: 'Не открылось' } }); out.noKey = label();
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const fl = found(renderedDom(items, failingScript, 8000));
+
+test('story 34: a key that did not work says so beside itself for two and a half seconds', () => {
+  assert.equal(fl.ru, 'Не сработало|Windows не приняла нажатие');
+  assert.equal(fl.ruBeside, true);
+  // Through the window's region, like any label
+  assert.equal(fl.region, true);
+  assert.equal(fl.at2s, fl.ru);
+  assert.equal(fl.en, "Didn't work|This window runs as administrator");
+  assert.equal(fl.enBeside, true);
+  // The first failure's time ran out meanwhile: it does not close the second's words
+  assert.equal(fl.pastFirst, fl.en);
+  assert.equal(fl.at2400, fl.en);
+  assert.equal(fl.at2600, null);
+  assert.equal(fl.regionClosed, false);
+  assert.equal(fl.whileHeld, null);
+  assert.equal(fl.afterRelease, 'Не сработало|Не открылось');
+  assert.equal(fl.afterReleaseBeside, true);
+  assert.equal(fl.nextPress, null);
+  assert.equal(fl.name, 'Снимок|Выделить область экрана');
+  assert.equal(fl.nameGone, null);
+  assert.equal(fl.noKey, null);
+});
+
+// The words wait for the release and for the drawing put off by the press, and go with their key
+// when the list scrolls
+const lateScript = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  const list = document.getElementById('list');
+  const label = () => { const c = document.getElementById('card'); return c.hidden ? null : c.querySelector('.c-title').textContent + '|' + c.querySelector('.c-sub').textContent; };
+  const mid = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+  const key = at => [...list.children].find(b => b.textContent === String(at));
+  const beside = at => Math.abs(mid(document.getElementById('card')) - mid(key(at))) < 0.5;
+  const rect = () => window.__calls.filter(c => c[0] === 'card').pop()[1].rect;
+  // As short as the real window makes a capsule of more than four keys: the list scrolls
+  document.getElementById('pill').style.height = '260px';
+  await sleep(50);
+  // A key is held; meanwhile its action fails and the keys change places. The release, and the
+  // loss of the pointer that follows every release, leave the words up, beside the key where
+  // it stands now
+  key(1).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: 10, clientY: 10 }));
+  window.__on.failed({ payload: { at: 1, title: 'Не сработало', why: 'Не открылось' } });
+  window.__view = { ...window.__view, items: [2, 1, 0, 3, 4].map(i => window.__view.items[i]) };
+  window.__on.reload();
+  window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: 10, clientY: 10 }));
+  document.getElementById('keys').dispatchEvent(new PointerEvent('lostpointercapture', { pointerId: 1 }));
+  await sleep(100);
+  out.order = [...list.children].map(b => b.textContent).join('');
+  out.late = label(); out.lateBeside = out.late && beside(1);
+  // The list scrolls a little: the words go with the key, and Rust is told their new rectangle.
+  // This browser draws no frames, so the scroll is announced by hand
+  const before = rect();
+  list.scrollTop = 30; list.dispatchEvent(new Event('scroll')); out.scrolledTo = list.scrollTop;
+  out.scrolled = label(); out.scrolledBeside = out.scrolled && beside(1); out.rectMoved = before[1] - rect()[1];
+  // The key leaves the part of the list that shows: the words go
+  list.scrollTop = 500; list.dispatchEvent(new Event('scroll'));
+  out.gone = label(); out.regionClosed = window.__calls.filter(c => c[0] === 'card').pop()[1].open;
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const lt = found(renderedDom([0, 1, 2, 3, 4].map(at => ({ at, name: String(at), icon: null })), lateScript, 3000));
+
+test('story 34: the words outlive the release and a drawing that was put off', () => {
+  assert.equal(lt.order, '21034');
+  assert.equal(lt.late, 'Не сработало|Не открылось');
+  assert.equal(lt.lateBeside, true);
+});
+
+test('story 34: the words go with their key when the list scrolls, and close when it is out of sight', () => {
+  assert.equal(lt.scrolledTo, 30);
+  assert.equal(lt.scrolled, 'Не сработало|Не открылось');
+  assert.equal(lt.scrolledBeside, true);
+  assert.equal(lt.rectMoved, 30);
+  assert.equal(lt.gone, null);
+  assert.equal(lt.regionClosed, false);
+});
+
+// ---------- the foot and the folded capsule
+// Rust sizes the window, folds the capsule and saves its place, and Windows carries the folded
+// key; here the stand-in for Rust answers a fold the way Rust does, with a folded view.
+const foldingScript = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  const calls = name => window.__calls.filter(c => c[0] === name).map(c => c[1]);
+  const foot = () => [...document.querySelectorAll('#keys > .item.add')];
+  const long = () => foot().reduce((sum, b) => sum + b.getBoundingClientRect().height, 0);
+  const pill = document.getElementById('pill');
+  const label = () => { const c = document.getElementById('card'); return c.hidden ? null : c.querySelector('.c-title').textContent; };
+  const at = (type, x, y) => new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: x, clientY: y });
+  const mid = el => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+  const tap = el => { const [x, y] = mid(el); el.dispatchEvent(at('pointerdown', x, y)); window.dispatchEvent(at('pointerup', x, y)); };
+  await sleep(50);
+  // At rest the foot is the plus; a tap puts the gear over the arrow, one sign longer in all
+  out.rest = [foot().length, long()];
+  tap(foot()[0]);
+  out.open = [foot().length, long(), foot()[0].getBoundingClientRect().bottom <= foot()[1].getBoundingClientRect().top];
+  out.footCalls = calls('foot').map(c => c.open); out.tapsOnPlus = calls('tap').length;
+  // The gear asks for the settings window, the way the plus used to
+  tap(foot()[0]);
+  out.gear = calls('tap').map(c => c.index); out.afterGear = foot().length;
+  // Four seconds after the last touch of a sign the plus is back
+  await sleep(3900); out.at3900 = foot().length;
+  await sleep(200); out.at4100 = foot().length; out.closed = calls('foot').pop().open;
+  // A touch of any key puts the plus back at once
+  tap(foot()[0]); out.again = foot().length;
+  tap(document.querySelector('#list .item')); await sleep(30);
+  out.afterKey = foot().length; out.keyTap = calls('tap').pop().index;
+  // The arrow asks Rust to fold; Rust answers with a folded view
+  tap(foot()[0]); tap(foot()[1]);
+  out.fold = calls('fold').length;
+  window.__view = { ...window.__view, folded: true }; window.__on.reload(); await sleep(50);
+  const key = () => document.querySelector('.item.unfold');
+  out.folded = [document.querySelectorAll('.item').length, !!key(), getComputedStyle(document.getElementById('grip')).display, pill.getBoundingClientRect().top, pill.getBoundingClientRect().height];
+  // No label of any kind: not for a long press, a hover, a failure or a program's keys
+  let [x, y] = mid(key());
+  key().dispatchEvent(at('pointerdown', x, y)); await sleep(450); out.longLabel = label();
+  // Held and not moved, it still brings the capsule back, like a tap
+  window.dispatchEvent(at('pointerup', x, y)); out.unfoldAfterLong = calls('unfold').length;
+  tap(key()); out.unfoldAfterTap = calls('unfold').length;
+  window.__on.hover({ payload: [x, y] }); await sleep(400); out.hoverLabel = label(); window.__on.hover({ payload: null });
+  window.__on.failed({ payload: { at: 0, title: 'Не сработало', why: 'Не открылось' } }); out.failLabel = label();
+  window.__on.set({ payload: 'Клавиши для Paint Studio' }); await sleep(50); out.noteLabel = label();
+  out.cards = calls('card').filter(c => c.open).length;
+  // Windows carries the folded key, not the page: a press that reached the page and moved,
+  // held first or not, carries nothing and does not bring the capsule back
+  key().dispatchEvent(at('pointerdown', x, y)); await sleep(450);
+  window.dispatchEvent(at('pointermove', x, y + 100)); window.dispatchEvent(at('pointerup', x, y + 100));
+  key().dispatchEvent(at('pointerdown', x, y)); window.dispatchEvent(at('pointermove', x, y + 40)); window.dispatchEvent(at('pointerup', x, y + 40));
+  out.moved = [calls('unfold').length, calls('tap').length, calls('move_item').length, pill.getBoundingClientRect().top];
+  // At the top edge the folded key stands along the row
+  window.__view = { ...window.__view, edge: 'top' }; window.__on.reload(); await sleep(50);
+  const r = pill.getBoundingClientRect();
+  out.top = [r.left, r.width, r.height, r.top];
+  // Unfolded by Rust, the capsule is whole again, with the plus
+  window.__view = { ...window.__view, edge: 'right', folded: false }; window.__on.reload(); await sleep(50);
+  out.back = [document.querySelectorAll('#list .item').length, foot().length, document.body.classList.contains('folded')];
+  // A capsule that could not fold says so beside its foot
+  window.__on.failed({ payload: { at: null, title: 'Не сработало', why: 'Windows не приняла нажатие' } });
+  out.foldFailed = label(); out.foldFailedBeside = Math.abs(mid(document.getElementById('card'))[1] - mid(foot()[0])[1]) < 0.5;
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const fd = found(renderedDom(items, foldingScript, 12000));
+
+test('story 35: the plus opens the gear and the fold arrow, and they go after four seconds or a tap on a key', () => {
+  // 38 px at rest and two signs of 38 px when open: `ADD` in layout.rs, which sizes the window
+  assert.deepEqual(fd.rest, [1, 38]);
+  assert.deepEqual(fd.open, [2, 76, true]);
+  assert.deepEqual(fd.footCalls, [true]);
+  assert.equal(fd.tapsOnPlus, 0);
+  assert.deepEqual(fd.gear, [null]);
+  assert.equal(fd.afterGear, 2);
+  assert.equal(fd.at3900, 2);
+  assert.equal(fd.at4100, 1);
+  assert.equal(fd.closed, false);
+  assert.equal(fd.again, 2);
+  assert.equal(fd.afterKey, 1);
+  assert.equal(fd.keyTap, 0);
+  assert.equal(fd.fold, 1);
+});
+
+test('story 36: the folded capsule is one key with no label; a touch brings the capsule back', () => {
+  // One key, no handle and no plus, the short pill 12 px into the window
+  assert.deepEqual(fd.folded, [1, true, 'none', 12, 60]);
+  assert.equal(fd.longLabel, null);
+  assert.equal(fd.unfoldAfterLong, 1);
+  assert.equal(fd.unfoldAfterTap, 2);
+  assert.equal(fd.hoverLabel, null);
+  assert.equal(fd.failLabel, null);
+  assert.equal(fd.noteLabel, null);
+  assert.equal(fd.cards, 0);
+  assert.deepEqual(fd.moved, [2, 2, 0, 12]);
+  assert.deepEqual(fd.top, [12, 60, 60, 0]);
+  assert.deepEqual(fd.back, [5, 1, false]);
+  assert.equal(fd.foldFailed, 'Не сработало');
+  assert.equal(fd.foldFailedBeside, true);
+});
+
+// ---------- the signs move nothing, and a key under the fading end is not tapped
+// Eight items, four of them showing, and the pill as long as Rust says (`pill_length` in
+// layout.rs): 319 px with the plus, 357 px with the two signs. The window here never changes.
+const steadyScript = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  const calls = name => window.__calls.filter(c => c[0] === name).map(c => c[1]);
+  const list = document.getElementById('list');
+  const rows = () => [...list.children];
+  const foot = () => [...document.querySelectorAll('#keys > .item.add')];
+  const label = () => { const c = document.getElementById('card'); return c.hidden ? null : c.querySelector('.c-title').textContent; };
+  const at = (type, x, y) => new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: x, clientY: y });
+  const mid = el => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+  const tap = el => { const [x, y] = mid(el); el.dispatchEvent(at('pointerdown', x, y)); window.dispatchEvent(at('pointerup', x, y)); };
+  const places = () => [...rows(), foot()[0]].map(b => { const r = b.getBoundingClientRect(); return [r.left, r.top]; });
+  // This browser draws no frames: a scroll the page asks for is done at once and announced by
+  // hand, and how it was asked for is kept
+  const asked = [], scrollBy = list.scrollBy.bind(list);
+  list.scrollBy = how => { asked.push(how.behavior); scrollBy({ ...how, behavior: 'auto' }); list.dispatchEvent(new Event('scroll')); };
+  window.__view = { ...window.__view, pill: [319, 357] }; window.__on.reload(); await sleep(50);
+  const pill = document.getElementById('pill');
+  out.rest = [pill.getBoundingClientRect().height, foot().length];
+  const before = places();
+  tap(foot()[0]);
+  out.open = [pill.getBoundingClientRect().height, foot().length];
+  out.openMoved = places().filter((p, i) => p[0] !== before[i][0] || p[1] !== before[i][1]).length;
+  await sleep(4200);
+  out.closed = [pill.getBoundingClientRect().height, foot().length];
+  out.closedMoved = places().filter((p, i) => p[0] !== before[i][0] || p[1] !== before[i][1]).length;
+  // The fourth key shows whole and is tapped; the fifth peeks out from under the fading end
+  tap(rows()[3]); out.wholeTap = calls('tap').map(c => c.index);
+  const veiled = rows()[4];
+  let [x, y] = mid(veiled);
+  veiled.dispatchEvent(at('pointerdown', x, y)); out.dips = veiled.classList.contains('down');
+  window.dispatchEvent(at('pointerup', x, y));
+  out.veiledTap = [calls('tap').length, veiled.classList.contains('flash'), list.scrollTop, asked.join()];
+  tap(rows()[4]); out.tapAfterReveal = calls('tap').pop().index;
+  // Held, a veiled key shows no label and is not carried; a finger moving on it scrolls the list
+  [x, y] = mid(rows()[5]);
+  rows()[5].dispatchEvent(at('pointerdown', x, y)); await sleep(450); out.heldLabel = label();
+  window.dispatchEvent(at('pointermove', x, y - 30)); list.dispatchEvent(new Event('scroll'));
+  out.dragged = [list.scrollTop, document.querySelectorAll('.carried').length];
+  window.dispatchEvent(at('pointerup', x, y - 30)); await sleep(50);
+  out.afterDrag = [calls('tap').length, calls('move_item').length];
+  // The other end: at the end of the list the fourth key is under the fading start
+  list.scrollTop = 9999; list.dispatchEvent(new Event('scroll')); out.end = list.scrollTop;
+  tap(rows()[3]);
+  out.start = [calls('tap').length, list.scrollTop];
+  tap(rows()[3]); out.startTap = calls('tap').pop().index;
+  // Lying along the top edge the list goes sideways
+  window.__view = { ...window.__view, edge: 'top' }; window.__on.reload(); await sleep(50);
+  out.flat = [pill.getBoundingClientRect().width, pill.getBoundingClientRect().height];
+  const taps = calls('tap').length;
+  tap(rows()[4]);
+  out.flatVeiled = [calls('tap').length - taps, list.scrollLeft];
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const sd = found(renderedDom(Array.from({ length: 8 }, (_, at) => ({ at, name: 'Клавиша ' + at, icon: null })), steadyScript, 12000));
+
+test('the signs open and close without moving a key of the list or the first sign', () => {
+  assert.deepEqual(sd.rest, [319, 1]);
+  assert.deepEqual(sd.open, [357, 2]);
+  assert.equal(sd.openMoved, 0);
+  assert.deepEqual(sd.closed, [319, 1]);
+  assert.equal(sd.closedMoved, 0);
+});
+
+test('a key the fading end hides by more than a third is not tapped: the list scrolls to it', () => {
+  assert.deepEqual(sd.wholeTap, [3]);
+  assert.equal(sd.dips, false);
+  // No tap and no flash, and the list goes on by one key, smoothly
+  assert.deepEqual(sd.veiledTap, [1, false, 54, 'smooth']);
+  assert.equal(sd.tapAfterReveal, 4);
+  assert.equal(sd.heldLabel, null);
+  assert.deepEqual(sd.dragged, [84, 0]);
+  assert.deepEqual(sd.afterDrag, [2, 0]);
+  // 8 keys of 54 px in a list of 234 px end at 198; the fourth then starts 18 px into the list
+  assert.equal(sd.end, 198);
+  assert.deepEqual(sd.start, [2, 144]);
+  assert.equal(sd.startTap, 3);
+  assert.deepEqual(sd.flat, [319, 60]);
+  assert.deepEqual(sd.flatVeiled, [0, 54]);
 });
 
 // ---------- feedback on a tap
@@ -694,6 +1004,36 @@ const editing = `(async () => {
   closeDialog();
   window.__settings = { ...window.__settings, items: window.__settings.items.slice(0, 4) };
   await again();
+  // A set from a file: two buttons under the ready sets. The file shows as one more card; its keys
+  // go to the end of the list as the file has them, whatever is chosen above, and one line says
+  // what came of it
+  const fileSet = [{ name: 'Кисть', icon: 'snip', action: 'hotkey', keys: 'b', only_in: 'absent.exe' },
+    { name: 'Нет', action: 'open', target: 'D:/gone.exe' }, { name: 'Снимок', action: 'hotkey', keys: 'win+shift+s' }];
+  window.__keySet = () => ({ name: 'От друга', items: fileSet });
+  window.__keySetItems = a => ({ added: [a.set[0]], had: 1, missing: 1 });
+  const tool = n => document.querySelectorAll('#set-tools .btn')[n].click();
+  const cards = () => [...document.querySelectorAll('#body .bundle')];
+  kind(4); await sleep(20);
+  out.setTools = texts('#set-tools .btn');
+  out.setUnder = !!(cards().pop().compareDocumentPosition($('set-tools')) & Node.DOCUMENT_POSITION_FOLLOWING);
+  seg(1); chip('Paint Studio');
+  tool(0); await sleep(20);
+  out.setSave = [last('save_key_set'), $('toast-text').textContent];
+  tool(1); await sleep(20);
+  const fileCard = cards().pop();
+  out.setCard = [cards().length, fileCard.querySelector('b').textContent, fileCard.querySelector('small').textContent, fileCard.querySelectorAll('.key').length, fileCard.querySelector('.btn').textContent];
+  const setSaves = calls('save_items').length;
+  fileCard.querySelector('.btn').click(); await sleep(20);
+  out.setCall = last('key_set_items');
+  out.setSaved = last('save_items').items;
+  out.setToast = $('toast-text').textContent;
+  out.setClosed = !$('shade').classList.contains('on');
+  await again();
+  // A file that is not a key set: one line, no card, nothing saved
+  window.__keySet = () => { throw 'not a key set'; };
+  kind(4); await sleep(20); tool(1); await sleep(20);
+  out.setBad = [$('toast-text').textContent, cards().length, calls('save_items').length - setSaves];
+  closeDialog();
   // A site, file or folder: a bare address is a site
   kind(2);
   const inputs = () => [...document.querySelectorAll('#body input[type=text]')];
@@ -890,6 +1230,20 @@ test('a ready set goes to the end of the list, for the program chosen, and not t
   assert.equal(set.bundleClosed, true);
   assert.equal(set.bundleAgain, 0);
   assert.equal(set.bundleAgainToast, 'Все клавиши набора уже есть в списке');
+});
+
+test('story 37: keys are saved to a file, and a set from a file is a card that adds its keys with one line of what came of it', () => {
+  assert.deepEqual(set.setTools, ['Сохранить мои клавиши…', 'Набор из файла…']);
+  assert.equal(set.setUnder, true);
+  assert.deepEqual(set.setSave, [{ name: 'Мои клавиши', onlyIn: null }, 'Сохранено клавиш: 3']);
+  assert.deepEqual(set.setCard, [3, 'От друга', 'Клавиш: 3', 3, 'Добавить']);
+  assert.equal(set.setCall.set.length, 3);
+  assert.deepEqual(set.setCall.items.map(i => i.name), ['Снимок', 'Диктовка', 'Заметки', 'Потом']);
+  assert.deepEqual(set.setSaved.map(i => i.name), ['Снимок', 'Диктовка', 'Заметки', 'Потом', 'Кисть']);
+  assert.equal(set.setSaved[4].only_in, 'absent.exe');
+  assert.equal(set.setToast, 'Добавлено 1. Уже были: 1. Нет программы: 1');
+  assert.equal(set.setClosed, true);
+  assert.deepEqual(set.setBad, ['Это не набор клавиш Tapka', 2, 1]);
 });
 
 test('a tap on an item opens its card, which fits the window with its path folded away', () => {

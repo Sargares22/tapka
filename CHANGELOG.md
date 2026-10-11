@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 (2026-10-11)
+
+- The capsule folds away: a tap on *+* puts two signs in its place for a few seconds, a gear that opens the settings window and an arrow that folds the capsule into one key at the edge. A tap on that key brings the capsule back; drag it, and it goes to the left, right or top edge, like the capsule by its handle. Folded stays folded after a restart.
+- A key that did not work says so: a label *Didn't work* shows beside it for a moment, with the reason (Windows did not accept the key press, the target did not open, or the window in front runs as administrator). A *Hold* key glows only once the key really went down, and keeps glowing if it could not be let go.
+- New ready-made Windows actions for a tablet without a keyboard: Esc, the four arrows, Space and Full screen (F11), each with its own icon, and a fourth ready set, *Video*.
+- Key sets in files: *Ready set* now saves your keys to a `.tapka` file, all of them or those of one program, and adds the keys of someone else's file as one more card. Your own keys stay as they are; keys you already have, and keys that open something not on this machine, are left out. Only keys travel in the file: not the look, the place of the capsule, or picture files.
+- A key that is mostly hidden under the fading end of the list no longer fires on a tap: the list scrolls to show it instead.
+- Fixed: a press beside the *Add* dialog closed it and then fell on the row under it; the settings window came to the front only every other time.
+
 ## 1.2.1 (2026-10-10)
 
 - Keys are reordered right on the capsule: hold a key until its label shows, then carry it along the capsule; the others make room and the release leaves it there. The order is saved to the settings file.

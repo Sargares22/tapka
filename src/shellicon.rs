@@ -10,10 +10,19 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_ICONONLY};
 
-/// The icon of what `target` names, `size` px square: a path to an exe, a file or a folder, or a
-/// `shell:AppsFolder\…` address. `None` for web addresses and for anything Windows cannot find.
+/// Whether `target` is somewhere else: an address with a scheme, or a path on another computer
+/// (`\\server\…`). Asking the shell about one of these goes to the network and may hang, and an
+/// item that came in a key set from somebody else is drawn before it is ever tapped.
+pub fn remote(target: &str) -> bool {
+    let target = target.trim().to_lowercase();
+    target.contains("://") || target.starts_with("file:") || target.replace('/', "\\").starts_with(r"\\")
+}
+
+/// The icon of what `target` names, `size` px square: a path to an exe, a file or a folder on this
+/// computer, or a `shell:AppsFolder\…` address. `None` for what is `remote` and for anything
+/// Windows cannot find.
 pub fn png(target: &str, size: i32) -> Option<Vec<u8>> {
-    if target.contains("://") {
+    if remote(target) {
         return None;
     }
     // The shell reads paths with backslashes only
@@ -82,5 +91,16 @@ mod tests {
         assert!(super::png(&windir, 64).is_some());
         assert!(super::png("https://example.com", 64).is_none());
         assert!(super::png(r"C:\no\such\program.exe", 64).is_none());
+    }
+
+    #[test]
+    fn nothing_on_the_network_is_asked_for_an_icon() {
+        let far = [r"\\server\share\tool.exe", "//server/share/tool.exe", r"  \\10.0.0.1\c$", r"\\?\UNC\server\share", "https://example.com", "file://server/a.txt", r"FILE:\\server\a.txt"];
+        for target in far {
+            assert!(super::remote(target), "{target}");
+        }
+        for target in [r"C:\Tools\notes.exe", "C:/Tools/notes.exe", r"shell:AppsFolder\Some.App_abc!App", r"D:\a\\b.txt", "notes.exe"] {
+            assert!(!super::remote(target), "{target}");
+        }
     }
 }

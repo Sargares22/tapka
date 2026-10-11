@@ -65,6 +65,12 @@ pub struct Settings {
     pub tablet_only: bool,
     /// A quiet click when a tap on a key works. Off unless asked for.
     pub click_sound: bool,
+    /// The capsule is folded into one key. Not the same as hidden: a folded capsule is hidden and
+    /// shown like an open one, and comes back folded.
+    pub folded: bool,
+    /// Where the folded key's pill starts along the edge, as a share of the work area, like `top`.
+    /// In the file: `"folded_at"`.
+    pub folded_at: f64,
     pub items: Vec<Item>,
 }
 
@@ -81,6 +87,8 @@ impl Settings {
             updates: true,
             tablet_only: false,
             click_sound: false,
+            folded: false,
+            folded_at: DEFAULT_TOP,
             items: Vec::new(),
         }
     }
@@ -100,7 +108,7 @@ pub struct Preset {
     pub en: (&'static str, &'static str),
 }
 
-pub const PRESETS: [Preset; 23] = [
+pub const PRESETS: [Preset; 30] = [
     Preset { id: "snip", icon: "snip", action: ("hotkey", "win+shift+s"), ru: ("Снимок", "Выделить область экрана, снимок уйдёт в буфер"), en: ("Snip", "Select a screen area; the shot goes to the clipboard") },
     Preset { id: "paste", icon: "paste", action: ("hotkey", "ctrl+v"), ru: ("Вставить", "Вставить из буфера в активное окно"), en: ("Paste", "Paste the clipboard into the active window") },
     Preset { id: "copy", icon: "copy", action: ("hotkey", "ctrl+c"), ru: ("Копировать", "Скопировать выделенное в буфер"), en: ("Copy", "Copy the selection to the clipboard") },
@@ -124,6 +132,13 @@ pub const PRESETS: [Preset; 23] = [
     Preset { id: "holdctrl", icon: "ctrl", action: ("hold", "ctrl"), ru: ("Держать Ctrl", HOLD_HINT.0), en: ("Hold Ctrl", HOLD_HINT.1) },
     Preset { id: "holdalt", icon: "alt", action: ("hold", "alt"), ru: ("Держать Alt", HOLD_HINT.0), en: ("Hold Alt", HOLD_HINT.1) },
     Preset { id: "holdspace", icon: "space", action: ("hold", "space"), ru: ("Держать Space", HOLD_HINT.0), en: ("Hold Space", HOLD_HINT.1) },
+    Preset { id: "esc", icon: "esc", action: ("hotkey", "esc"), ru: ("Esc", "Выйти или отменить в активном окне"), en: ("Esc", "Leave or cancel in the active window") },
+    Preset { id: "left", icon: "left", action: ("hotkey", "left"), ru: ("Влево", "Стрелка влево: назад в видео, к предыдущему"), en: ("Left", "Left arrow: back in a video, to the previous one") },
+    Preset { id: "right", icon: "right", action: ("hotkey", "right"), ru: ("Вправо", "Стрелка вправо: вперёд в видео, к следующему"), en: ("Right", "Right arrow: ahead in a video, to the next one") },
+    Preset { id: "up", icon: "up", action: ("hotkey", "up"), ru: ("Вверх", "Стрелка вверх: выше по списку или странице"), en: ("Up", "Up arrow: up a list or a page") },
+    Preset { id: "down", icon: "down", action: ("hotkey", "down"), ru: ("Вниз", "Стрелка вниз: ниже по списку или странице"), en: ("Down", "Down arrow: down a list or a page") },
+    Preset { id: "spacebar", icon: "spacebar", action: ("hotkey", "space"), ru: ("Пробел", "Пауза и пуск в плеере, пробел в тексте"), en: ("Space", "Pause and play in a player; a space in text") },
+    Preset { id: "fullscreen", icon: "fullscreen", action: ("hotkey", "f11"), ru: ("Во весь экран", "Развернуть активное окно во весь экран или вернуть"), en: ("Full screen", "Make the active window full screen or bring it back") },
 ];
 
 /// The hint of the ready actions that hold a key; the 20 seconds are `actions::HOLD_IDLE_MS`.
@@ -172,10 +187,11 @@ pub struct Bundle {
     pub presets: &'static [&'static str],
 }
 
-pub const BUNDLES: [Bundle; 3] = [
+pub const BUNDLES: [Bundle; 4] = [
     Bundle { id: "tablet", ru: "Планшет", en: "Tablet", presets: &["snip", "paste", "voice", "tasks", "keyboard"] },
     Bundle { id: "drawing", ru: "Рисование", en: "Drawing", presets: &["undo", "redo", "holdshift", "holdctrl", "holdspace", "snip"] },
     Bundle { id: "text", ru: "Текст", en: "Text", presets: &["copy", "paste", "undo", "selectall", "voice"] },
+    Bundle { id: "video", ru: "Видео", en: "Video", presets: &["esc", "left", "right", "spacebar", "fullscreen"] },
 ];
 
 /// Whether two actions do the same: the same keys however they are written (a held `control` is a
@@ -203,13 +219,124 @@ pub fn bundle_items(bundle: &Bundle, russian: bool, only_in: Option<&str>, exist
             raw["only_in"] = json!(program);
         }
         let Ok(item) = parse_item(&raw) else { continue };
-        if have.iter().any(|h| same_action(&h.action, &item.action) && h.only_in == item.only_in) {
+        if has(&have, &item) {
             continue;
         }
         have.push(item);
         added.push(raw);
     }
     added
+}
+
+/// Whether the list already has an item that does the same for the same program, or for all
+/// programs when the item names none.
+fn has(have: &[Item], item: &Item) -> bool {
+    have.iter().any(|h| same_action(&h.action, &item.action) && h.only_in == item.only_in)
+}
+
+/// A key set is a file of items a person saves and hands to another: `{ "items": [...] }`, the
+/// items written as the settings file writes them. It comes from anywhere, so it is read
+/// strictly and is no larger than this.
+pub const SET_MAX_BYTES: u64 = 256 * 1024;
+pub const SET_MAX_ITEMS: usize = 200;
+
+/// An item as a key set carries it: the name, the hint, the action, a built-in icon and the
+/// program it is for. Nothing else of the item goes along: not `lit`, not a picture that is a
+/// file, not a field the panel does not know.
+fn set_item(item: &Item) -> Value {
+    let (kind, field, value) = match &item.action {
+        Action::Open(target) => ("open", "target", target),
+        Action::Hotkey(keys) => ("hotkey", "keys", keys),
+        Action::Hold(keys) => ("hold", "keys", keys),
+    };
+    let mut raw = json!({ "name": item.name });
+    if let Some(icon) = item.icon.as_deref().filter(|i| crate::glyphs::builtin(i).is_some()) {
+        raw["icon"] = json!(icon);
+    }
+    if let Some(hint) = &item.hint {
+        raw["hint"] = json!(hint);
+    }
+    raw["action"] = json!(kind);
+    raw[field] = json!(value);
+    if let Some(program) = &item.only_in {
+        raw["only_in"] = json!(program);
+    }
+    raw
+}
+
+/// The text of a key set made of the settings text: every item the panel uses, or only those for
+/// the program `only_in` names; and how many they are. Nothing but items goes into it. A set
+/// that `read_set` would refuse for its size is not made: the error is `large`.
+pub fn set_text(settings: &str, only_in: Option<&str>) -> Result<(String, usize), &'static str> {
+    let v: Option<Value> = serde_json::from_str(settings.trim_start_matches('\u{feff}')).ok();
+    let only_in = only_in.map(|p| p.trim().to_lowercase()).filter(|p| !p.is_empty());
+    let items: Vec<Value> = v
+        .as_ref()
+        .and_then(|v| v.get("items")?.as_array())
+        .ok_or("the settings file is not a JSON object")?
+        .iter()
+        .filter_map(|raw| parse_item(raw).ok())
+        .filter(|item| only_in.is_none() || item.only_in == only_in)
+        .map(|item| set_item(&item))
+        .collect();
+    let n = items.len();
+    let text = to_text(&json!({ "items": items }));
+    if n > SET_MAX_ITEMS || text.len() as u64 > SET_MAX_BYTES {
+        return Err("large");
+    }
+    Ok((text, n))
+}
+
+/// The file a key set is written to when the save dialog answered `chosen`: a key set is a
+/// `.tapka` file whatever name was typed. The dialog asked about writing over `chosen` only, so
+/// when the name had to be completed and `exists` says that file is there, there is none.
+pub fn set_path(chosen: &Path, exists: impl Fn(&Path) -> bool) -> Option<std::path::PathBuf> {
+    if chosen.extension().is_some_and(|e| e.eq_ignore_ascii_case("tapka")) {
+        return Some(chosen.to_path_buf());
+    }
+    let mut path = chosen.to_path_buf();
+    path.as_mut_os_string().push(".tapka");
+    (!exists(&path)).then_some(path)
+}
+
+/// The items of a key set, each as `set_item` writes it, or `None` when this is not a key set: not
+/// an object with a list of items, the list empty or too long, or an item the panel cannot use.
+pub fn parse_set(v: &Value) -> Option<Vec<Value>> {
+    let items = v.as_object()?.get("items")?.as_array()?;
+    if items.is_empty() || items.len() > SET_MAX_ITEMS {
+        return None;
+    }
+    items.iter().map(|raw| parse_item(raw).ok().map(|item| set_item(&item))).collect()
+}
+
+/// Reads a key set file. A file that is too large is not read at all.
+pub fn read_set(path: &Path) -> Option<Vec<Value>> {
+    if std::fs::metadata(path).ok()?.len() > SET_MAX_BYTES {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    parse_set(&serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?)
+}
+
+/// What a key set adds to the end of `existing`: the items to add, each for the program it names
+/// itself; how many the list already has (the rule of the ready sets); and how many open
+/// something `found` says is not on this machine. `None` when `set` is not the items of a key set.
+pub fn set_items(set: &[Value], existing: &[Value], found: impl Fn(&str) -> bool) -> Option<(Vec<Value>, usize, usize)> {
+    let set = parse_set(&json!({ "items": set }))?;
+    let mut have: Vec<Item> = existing.iter().filter_map(|v| parse_item(v).ok()).collect();
+    let (mut added, mut had, mut missing) = (Vec::new(), 0, 0);
+    for raw in set {
+        let Ok(item) = parse_item(&raw) else { continue };
+        if has(&have, &item) {
+            had += 1;
+        } else if matches!(&item.action, Action::Open(target) if !found(target)) {
+            missing += 1;
+        } else {
+            have.push(item);
+            added.push(raw);
+        }
+    }
+    Some((added, had, missing))
 }
 
 /// The file written on first run: ready actions of Windows only, named in the system's language.
@@ -266,6 +393,13 @@ pub fn with_field(text: &str, key: &str, value: Value) -> Option<String> {
         }
     }
     Some(to_text(&v))
+}
+
+/// The settings text after a carry: the capsule is at `edge` now, and `along` it stands the
+/// capsule or, with `folded`, the folded key. The other of the two places is kept.
+pub fn with_landing(text: &str, edge: Edge, folded: bool, along: f64) -> Option<String> {
+    let text = with_field(text, "edge", json!(edge_name(edge)))?;
+    with_field(&text, if folded { "folded_at" } else { "top" }, share(along))
 }
 
 /// The settings text with the item at `from` put where the item at `to` is. Both count the items
@@ -393,6 +527,8 @@ pub fn parse(text: &str) -> Result<(Settings, Vec<String>), String> {
         updates: v.get("updates").and_then(Value::as_bool).unwrap_or(true),
         tablet_only: v.get("tablet_only").and_then(Value::as_bool).unwrap_or(false),
         click_sound: v.get("click_sound").and_then(Value::as_bool).unwrap_or(false),
+        folded: v.get("folded").and_then(Value::as_bool).unwrap_or(false),
+        folded_at: v.get("folded_at").and_then(Value::as_f64).unwrap_or(DEFAULT_TOP),
         items: good,
     };
     Ok((settings, skipped))
@@ -589,6 +725,33 @@ mod tests {
     }
 
     #[test]
+    fn a_folded_capsule_is_written_into_the_file_and_the_rest_of_the_file_is_kept() {
+        // A file from before the capsule could fold, the default file, and anything that is not a switch
+        assert!(!parse(OWN).unwrap().0.folded);
+        assert!(!parse(&default_text(true)).unwrap().0.folded);
+        assert!(!parse(r#"{"folded":"yes","folded_at":"low","items":[]}"#).unwrap().0.folded);
+        // Folding writes two fields before the items; the owner's field, `lit` and the item of a
+        // kind this version does not know stay as they were
+        let out = with_field(OWN, "folded", json!(true)).and_then(|text| with_field(&text, "folded_at", share(0.61237))).unwrap();
+        assert_eq!(out, OWN.replace("  \"items\": [", "  \"folded\": true,\n  \"folded_at\": 0.6124,\n  \"items\": ["));
+        let (s, _) = parse(&out).unwrap();
+        assert_eq!((s.folded, s.folded_at, s.top), (true, 0.6124, 0.4529));
+        // Unfolding keeps the place for the next time
+        let back = with_field(&out, "folded", json!(false)).unwrap();
+        assert_eq!(back, out.replace("\"folded\": true", "\"folded\": false"));
+        assert_eq!((parse(&back).unwrap().0.folded, parse(&back).unwrap().0.folded_at), (false, 0.6124));
+        // The folded key carried to the top edge: the capsule's edge goes with it, its own place
+        // along an edge and everything the panel does not know stay
+        let moved = with_landing(&out, Edge::Top, true, 0.25).unwrap();
+        assert_eq!(moved, out.replace("\"edge\": \"right\"", "\"edge\": \"top\"").replace("0.6124", "0.25"));
+        let (s, _) = parse(&moved).unwrap();
+        assert_eq!((s.edge, s.folded, s.folded_at, s.top), (Edge::Top, true, 0.25, 0.4529));
+        // An open capsule carried there keeps the folded key's place instead
+        let (s, _) = parse(&with_landing(&back, Edge::Left, false, 0.3).unwrap()).unwrap();
+        assert_eq!((s.edge, s.folded_at, s.top), (Edge::Left, 0.6124, 0.3));
+    }
+
+    #[test]
     fn an_imported_icon_never_replaces_another_picture() {
         let dir = std::env::temp_dir().join(format!("tapka-icons-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -696,6 +859,9 @@ mod tests {
         );
         let text = BUNDLES.iter().find(|b| b.id == "text").unwrap();
         assert_eq!(names(&bundle_items(text, false, None, &[])), ["Copy", "Paste", "Undo", "Select all", "Voice typing"]);
+        let video = BUNDLES.iter().find(|b| b.id == "video").unwrap();
+        assert_eq!(names(&bundle_items(video, true, None, &[])), ["Esc", "Влево", "Вправо", "Пробел", "Во весь экран"]);
+        assert_eq!(names(&bundle_items(video, false, None, &[])), ["Esc", "Left", "Right", "Space", "Full screen"]);
         // For one program: every item says so, and the file reads it back
         let for_paint = bundle_items(text, true, Some("paint.exe"), &[]);
         assert!(for_paint.iter().all(|i| parse_item(i).unwrap().only_in.as_deref() == Some("paint.exe")));
@@ -726,6 +892,142 @@ mod tests {
         assert_eq!((s.items.len(), skipped.len()), (7, 1));
         assert_eq!(s.items[3].name, "Копировать");
         assert_eq!(s.items[3].only_in.as_deref(), Some("paint.exe"));
+    }
+
+    /// The owner's file with keys of every kind: for all programs and for one, with `lit`, with a
+    /// picture that is a file, with a field the panel does not know, and one it cannot use.
+    fn with_keys() -> String {
+        OWN.replace(
+            r#"{ "name": "Later""#,
+            r#"{ "name": "Brush", "icon": "own.png", "hint": "Soft", "action": "hotkey", "keys": "b", "only_in": "Paint.exe", "mine": 1 },
+    { "name": "Shift", "icon": "shift", "action": "hold", "keys": "shift", "only_in": "paint.exe" },
+    { "name": "Notes", "action": "open", "target": "C:\\Tools\\notes.exe" },
+    { "name": "Later""#,
+        )
+    }
+
+    #[test]
+    fn saved_keys_carry_items_only_and_come_back_without_repeats() {
+        let file = with_keys();
+        let existing = serde_json::from_str::<Value>(&file).unwrap()["items"].as_array().unwrap().clone();
+        let (text, n) = set_text(&file, None).unwrap();
+        assert_eq!(n, 4);
+        // Nothing of the look, the place, the `lit` rule, a picture file or an unknown field
+        for word in ["scale", "top", "edge", "\"note\"", "lit", "recorder", "own.png", "mine", "Later"] {
+            assert!(!text.contains(word), "{word}: {text}");
+        }
+        assert_eq!(
+            text,
+            r#"{
+  "items": [
+    { "name": "Dictation", "icon": "mic", "action": "hotkey", "keys": "ctrl+space" },
+    { "name": "Brush", "hint": "Soft", "action": "hotkey", "keys": "b", "only_in": "paint.exe" },
+    { "name": "Shift", "icon": "shift", "action": "hold", "keys": "shift", "only_in": "paint.exe" },
+    { "name": "Notes", "action": "open", "target": "C:\\Tools\\notes.exe" }
+  ]
+}
+"#
+        );
+        // The keys of one program, however its name is written
+        let (paint, n) = set_text(&file, Some("PAINT.exe")).unwrap();
+        assert_eq!((n, paint.contains("Dictation"), paint.contains("Brush")), (2, false, true));
+        // Read back, the set holds the same items, and the list it came from takes none of them
+        let set = parse_set(&serde_json::from_str(&text).unwrap()).unwrap();
+        let used: Vec<Item> = existing.iter().filter_map(|v| parse_item(v).ok()).collect();
+        assert_eq!(set.len(), used.len());
+        for (back, was) in set.iter().map(|v| parse_item(v).unwrap()).zip(&used) {
+            assert_eq!((&back.name, &back.hint, &back.action, &back.only_in), (&was.name, &was.hint, &was.action, &was.only_in));
+        }
+        assert_eq!(set_items(&set, &existing, |_| true), Some((Vec::new(), 4, 0)));
+        // An empty list takes them all, each for its own program
+        assert_eq!(set_items(&set, &[], |_| true), Some((set.clone(), 0, 0)));
+    }
+
+    #[test]
+    fn a_set_from_a_file_skips_what_is_not_here_and_keeps_the_rest_of_the_settings() {
+        let set = vec![
+            json!({ "name": "Gone", "action": "open", "target": "C:\\gone.exe" }),
+            json!({ "name": "Site", "action": "open", "target": "https://example.com", "lit": { "program": "a.exe", "window": "b" }, "run": "x" }),
+            json!({ "name": "Brush", "icon": "..\\own.png", "action": "hotkey", "keys": "b", "only_in": "absent.exe" }),
+            json!({ "name": "Again", "action": "hotkey", "keys": "Ctrl+Space" }),
+        ];
+        let existing = serde_json::from_str::<Value>(OWN).unwrap()["items"].as_array().unwrap().clone();
+        let (added, had, missing) = set_items(&set, &existing, |target| !target.contains("gone")).unwrap();
+        assert_eq!((had, missing), (1, 1));
+        // A shortcut for a program that is not here is added; what the file has beyond an item is dropped
+        assert_eq!(added, [
+            json!({ "name": "Site", "action": "open", "target": "https://example.com" }),
+            json!({ "name": "Brush", "action": "hotkey", "keys": "b", "only_in": "absent.exe" }),
+        ]);
+        // Saved the way the editor saves, the owner's field, `lit` and the unknown item are still there
+        let all: Vec<Value> = existing.iter().cloned().chain(added).collect();
+        let saved = with_field(OWN, "items", json!(all)).unwrap();
+        assert_eq!(
+            saved,
+            OWN.replace(
+                r#""run": ["a", "b"] }"#,
+                r#""run": ["a", "b"] },
+    { "name": "Site", "action": "open", "target": "https://example.com" },
+    { "name": "Brush", "action": "hotkey", "keys": "b", "only_in": "absent.exe" }"#,
+            )
+        );
+    }
+
+    #[test]
+    fn a_set_over_the_limits_is_not_saved() {
+        let key = |n: usize, hint: &str| format!(r#"{{ "name": "k{n}", "hint": "{hint}", "action": "hotkey", "keys": "b" }}"#);
+        let settings = |n: usize, hint: &str| format!(r#"{{ "items": [{}] }}"#, (0..n).map(|i| key(i, hint)).collect::<Vec<_>>().join(","));
+        // As many as a set may hold are saved, and the file reads back
+        let (text, n) = set_text(&settings(SET_MAX_ITEMS, ""), None).unwrap();
+        assert_eq!(n, SET_MAX_ITEMS);
+        assert_eq!(parse_set(&serde_json::from_str(&text).unwrap()).unwrap().len(), SET_MAX_ITEMS);
+        // One more, or fewer that make a file too large to be read
+        assert_eq!(set_text(&settings(SET_MAX_ITEMS + 1, ""), None), Err("large"));
+        assert_eq!(set_text(&settings(3, &"x".repeat(SET_MAX_BYTES as usize / 3)), None), Err("large"));
+    }
+
+    #[test]
+    fn a_key_set_is_a_tapka_file_and_writes_over_none_the_dialog_did_not_ask_about() {
+        let there = |p: &Path| p == Path::new(r"C:\a\notes.txt.tapka");
+        // The dialog's own answer is taken as it is: it asked about that file
+        assert_eq!(set_path(Path::new(r"C:\a\keys.tapka"), |_| true), Some(r"C:\a\keys.tapka".into()));
+        assert_eq!(set_path(Path::new(r"C:\a\keys.TAPKA"), |_| true), Some(r"C:\a\keys.TAPKA".into()));
+        // Another name is completed, and the file it makes must be new
+        assert_eq!(set_path(Path::new(r"C:\a\keys"), there), Some(r"C:\a\keys.tapka".into()));
+        assert_eq!(set_path(Path::new(r"C:\a\keys.txt"), there), Some(r"C:\a\keys.txt.tapka".into()));
+        assert_eq!(set_path(Path::new(r"C:\a\notes.txt"), there), None);
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_key_set_is_refused() {
+        let dir = std::env::temp_dir().join(format!("tapka-set-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("keys.tapka");
+        let key = r#"{ "name": "a", "action": "hotkey", "keys": "b" }"#;
+        let many = vec![key; SET_MAX_ITEMS + 1].join(",");
+        for bad in [
+            "not json".to_string(),
+            "[]".into(),
+            r#"{ "items": {} }"#.into(),
+            r#"{ "items": [] }"#.into(),
+            r#"{ "keys": [] }"#.into(),
+            r#"{ "items": ["text"] }"#.into(),
+            r#"{ "items": [{ "name": "a", "action": "script" }] }"#.into(),
+            format!(r#"{{ "items": [{key}, {{ "action": "open", "target": "x" }}] }}"#),
+            format!(r#"{{ "items": [{many}] }}"#),
+            // A set in every other way, but too large
+            format!(r#"{{ "items": [{key}], "pad": "{}" }}"#, "x".repeat(SET_MAX_BYTES as usize)),
+        ] {
+            std::fs::write(&file, &bad).unwrap();
+            assert_eq!(read_set(&file), None, "{}", &bad[..bad.len().min(60)]);
+        }
+        assert_eq!(read_set(&dir.join("none.tapka")), None);
+        assert_eq!(set_items(&[json!("text")], &[], |_| true), None);
+        // Within the limits it is a set, saved with a byte-order mark or not
+        std::fs::write(&file, format!("\u{feff}{{ \"items\": [{key}] }}")).unwrap();
+        assert_eq!(read_set(&file).unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

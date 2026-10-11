@@ -35,5 +35,12 @@
 | ctrl.svg | Держать Ctrl |
 | alt.svg | Держать Alt |
 | space.svg | Держать Space |
+| esc.svg | Esc |
+| left.svg | Стрелка влево |
+| right.svg | Стрелка вправо |
+| up.svg | Стрелка вверх |
+| down.svg | Стрелка вниз |
+| spacebar.svg | Пробел |
+| fullscreen.svg | Во весь экран |
 
 Свой значок: положить PNG или SVG в подпапку `icons` папки данных панели и указать имя файла.

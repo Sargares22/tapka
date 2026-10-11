@@ -58,6 +58,11 @@ struct AppState {
     showing: Mutex<()>,
     /// The keys `hold` items keep pressed, and when the capsule was last tapped.
     holds: Mutex<actions::Holds>,
+    /// The two signs show in the capsule's foot in place of the plus: the capsule is one sign longer.
+    signs: AtomicBool,
+    /// Counts the changes of the items: an answer about an item tapped before the last change
+    /// names a place that may hold another item by now.
+    items_age: std::sync::atomic::AtomicU32,
 }
 
 /// The panel never says it is the latest version before a check has passed.
@@ -185,6 +190,9 @@ struct Carry {
     k: f64,
     cell: f64,
     items: usize,
+    signs: bool,
+    /// The capsule is folded: what is carried, and what lands, is the folded key.
+    folded: bool,
 }
 /// The windows on the desktop that belong to an item's program, front to back. Only `open` items
 /// that name an exe or a Store app have any.
@@ -253,8 +261,26 @@ struct View {
     accent: String,
     /// A quiet click on a tap.
     click_sound: bool,
-    /// The name and the hint of the last key, the one that opens the editor.
+    /// The name and the hint of the plus in the capsule's foot, which opens the two signs.
     add: (&'static str, &'static str),
+    /// The two signs: the gear opens the settings window, the arrow to the edge folds the capsule.
+    gear: Sign,
+    fold: Sign,
+    /// The arrow on the folded key, which points away from the edge.
+    unfold: &'static str,
+    /// The capsule is folded into one key.
+    folded: bool,
+    /// Length of the pill in CSS px, with the plus in its foot and with the two signs: the page
+    /// draws it this long whatever the window is at the moment (`layout::pill_length`).
+    pill: Option<(f64, f64)>,
+}
+
+/// A sign of the capsule's foot as the page draws it: its name, its hint and its icon.
+#[derive(serde::Serialize)]
+struct Sign {
+    name: &'static str,
+    hint: &'static str,
+    glyph: &'static str,
 }
 
 #[tauri::command]
@@ -265,7 +291,7 @@ fn get_view(app: AppHandle) -> View {
     let settings = state.settings.lock().unwrap().clone();
     let marks = item_marks(&settings.items);
     let held = held_items(&settings.items, state.holds.lock().unwrap().held());
-    let items = shown_now(&app, &settings.items)
+    let items: Vec<PageItem> = shown_now(&app, &settings.items)
         .into_iter()
         .map(|at| {
             let it = &settings.items[at];
@@ -274,10 +300,33 @@ fn get_view(app: AppHandle) -> View {
             PageItem { at, on, live, held: held.contains(&at), name: it.name.clone(), hint: it.hint.clone(), icon, glyph }
         })
         .collect();
-    let add = if is_russian(&settings) { ("Добавить", "Открыть редактор пунктов") } else { ("Add", "Open the item editor") };
+    let russian = is_russian(&settings);
+    let add = if russian { ("Добавить", "Настройки и сворачивание капсулы") } else { ("Add", "Settings and folding the capsule") };
+    let (gear, fold) = if russian {
+        (("Настройки", "Открыть окно настроек"), ("Свернуть", "Свернуть капсулу в одну клавишу"))
+    } else {
+        (("Settings", "Open the settings window"), ("Fold", "Fold the capsule into one key"))
+    };
+    // The arrows are the built-in ones: to the edge to fold, away from it on the folded key
+    let (to_edge, from_edge) = match settings.edge {
+        layout::Edge::Right => ("right", "left"),
+        layout::Edge::Left => ("left", "right"),
+        layout::Edge::Top => ("up", "down"),
+    };
+    let glyph = |name| glyphs::builtin(name).unwrap_or_default();
+    let cell = layout::cell(tablet);
+    let pill = work_area(&app).map(|(work, k)| {
+        let long = |signs| layout::pill_length(work, k, cell, items.len(), settings.edge, signs);
+        (long(false), long(true))
+    });
     View {
+        pill,
+        gear: Sign { name: gear.0, hint: gear.1, glyph: glyph("gear") },
+        fold: Sign { name: fold.0, hint: fold.1, glyph: glyph(to_edge) },
+        unfold: glyph(from_edge),
+        folded: settings.folded,
         items,
-        cell: layout::cell(tablet),
+        cell,
         tablet,
         edge: config::edge_name(settings.edge),
         theme: config::theme_name(settings.theme),
@@ -305,61 +354,72 @@ fn show_held(app: &AppHandle) {
 }
 
 /// A tap on a `hold` item: its key goes down, or up if it was held. The key is sent with the holds
-/// locked (`actions::Holds`); there is no keyboard hook in the panel for SendInput to wait on.
+/// locked (`actions::Holds`); there is no keyboard hook in the panel for SendInput to wait on. A
+/// key Windows refused changes nothing: its item is lit as it was.
 fn hold(app: &AppHandle, key: &str) -> Result<(), String> {
     let vk = keys::holdable(key).ok_or(format!("cannot hold \"{key}\""))?;
     let mut sent = Ok(());
-    let down = app.state::<AppState>().holds.lock().unwrap().toggle(vk, |vk, up| sent = win::send_key(vk, up));
-    applog(app, &format!("hold: {key} {}", if down { "down" } else { "up" }));
-    show_held(app);
+    let down = app.state::<AppState>().holds.lock().unwrap().toggle(vk, |vk, up| {
+        sent = win::send_key(vk, up);
+        sent.is_ok()
+    });
+    if let Some(down) = down {
+        applog(app, &format!("hold: {key} {}", if down { "down" } else { "up" }));
+        show_held(app);
+    }
     sent
 }
 
 /// Lets go of held keys, every one of them or, with `idle`, only once the wait for a tap has run
-/// out, and puts their items out. The keys go up with the holds locked, as in `hold`.
-fn let_go(app: &AppHandle, why: &str, idle: bool) {
+/// out, and puts their items out. The keys go up with the holds locked, as in `hold`. A key
+/// Windows would not let go of stays held, and its item stays lit. Returns whether no key is
+/// left held.
+fn let_go(app: &AppHandle, why: &str, idle: bool) -> bool {
     let mut failed = Vec::new();
-    let send = |vk: u16, up: bool| {
-        if let Err(e) = win::send_key(vk, up) {
-            failed.push(format!("action failed: let go of key {vk:#x}: {e}"));
+    let send = |vk: u16, up: bool| match win::send_key(vk, up) {
+        Ok(()) => true,
+        Err(e) => {
+            failed.push(format!("action failed: let go of key {vk:#x} ({why}): {e}"));
+            false
         }
     };
     let state = app.state::<AppState>();
-    let vks = {
+    let (vks, none_left) = {
         let mut holds = state.holds.lock().unwrap();
         if idle {
-            holds.expire(std::time::Instant::now(), send)
+            let vks = holds.expire(std::time::Instant::now(), send);
+            (vks, holds.held().is_empty())
         } else {
-            holds.release_all(send)
+            holds.release_to_fold(send)
         }
     };
-    if vks.is_empty() {
-        return;
-    }
-    applog(app, &format!("hold: let go of {} key(s): {why}", vks.len()));
     for line in failed {
         applog(app, &line);
     }
+    if vks.is_empty() {
+        return none_left;
+    }
+    applog(app, &format!("hold: let go of {} key(s): {why}", vks.len()));
     show_held(app);
+    none_left
 }
 
-fn let_go_all(app: &AppHandle, why: &str) {
-    let_go(app, why, false);
+fn let_go_all(app: &AppHandle, why: &str) -> bool {
+    let_go(app, why, false)
 }
 
 /// Hides the capsule and brings it back when the clipboard changes or the wait runs out.
-/// Returns once the capsule is off the screen, so the keys that follow do not catch it.
-fn hide_capsule_until_snapshot(app: &AppHandle) -> Result<(), String> {
+/// Returns once the capsule is off the screen, so the keys that follow do not catch it, with the
+/// number of this hide, or with none when there was nothing to hide.
+fn hide_capsule_until_snapshot(app: &AppHandle) -> Result<Option<u32>, String> {
     let w = app.get_webview_window("capsule").ok_or("no capsule window")?;
     let state = app.state::<AppState>();
     let hwnd = w.hwnd().map_err(|e| e.to_string())?.0 as isize;
     let_go_all(app, "the capsule hid for a snapshot");
-    // A second snapshot before the first wait ran out: only the latest wait shows the capsule
-    static HIDES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let mine = {
         let _turn = state.showing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if !state.wanted.load(Ordering::Relaxed) {
-            return Ok(()); // already hidden, from the tray or by the keyboard: nothing to bring back
+            return Ok(None); // already hidden, from the tray or by the keyboard: nothing to bring back
         }
         state.snapping.store(true, Ordering::Relaxed);
         win::set_visible(hwnd, false);
@@ -380,39 +440,62 @@ fn hide_capsule_until_snapshot(app: &AppHandle) -> Result<(), String> {
                 (other, false) => other,
             };
         }
-        let state = app.state::<AppState>();
-        let _turn = state.showing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if HIDES.load(Ordering::Relaxed) == mine {
-            state.snapping.store(false, Ordering::Relaxed);
-            // Hidden from the tray or by the keyboard in the meantime: it stays hidden
-            if state.wanted.load(Ordering::Relaxed) {
-                win::set_visible(hwnd, true);
-                grab::set_visible(true);
-            }
-        }
+        back_from_snapshot(&app, hwnd, mine);
     });
     std::thread::sleep(std::time::Duration::from_millis(150));
-    Ok(())
+    Ok(Some(mine))
 }
 
-/// Performs a step with real Windows calls; a failure goes to the log.
-fn run_step(app: &AppHandle, step: actions::Step) {
+/// Counts the hides for a snapshot. A second snapshot before the first wait ran out: only the
+/// latest wait shows the capsule.
+static HIDES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The snapshot that hid the capsule, the hide numbered `mine`, is over or never began: the
+/// capsule comes back, folded if it was folded. Whoever comes second for the same hide, the wait
+/// or a failed send, finds nothing to do.
+fn back_from_snapshot(app: &AppHandle, hwnd: isize, mine: u32) {
+    let state = app.state::<AppState>();
+    let _turn = state.showing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !actions::ends_hide(HIDES.load(Ordering::Relaxed), mine, state.snapping.load(Ordering::Relaxed)) {
+        return;
+    }
+    state.snapping.store(false, Ordering::Relaxed);
+    // Hidden from the tray or by the keyboard in the meantime: it stays hidden
+    if state.wanted.load(Ordering::Relaxed) {
+        win::set_visible(hwnd, true);
+        grab::set_visible(true);
+    }
+}
+
+/// Performs a step with real Windows calls. A failure goes to the log and comes back as what the
+/// capsule says about it. A step that hid the capsule for a snapshot leaves the number of its
+/// hide in `hid`.
+fn run_step(app: &AppHandle, step: actions::Step, hid: &mut Option<u32>) -> Option<actions::Failure> {
+    use actions::Failure;
+    // Keys go to the active window. If its program has rights above the panel's, Windows may drop
+    // them and say nothing, so the window is looked at before they go. The look only explains:
+    // the keys are sent all the same.
+    let to_admin = matches!(step, actions::Step::SendKeys(_) | actions::Step::Hold(_)) && win::rights_above(win::front_rights(), win::own_rights());
     let result = match &step {
-        actions::Step::Open(target) => win::open(target),
+        actions::Step::Open(target) => win::open(target).map_err(|e| (Failure::Open, e)),
         // Sent with the holds locked, so a held key cannot come up between the look and the send
-        actions::Step::SendKeys(keys) => keys::parse(keys).and_then(|vks| {
-            let state = app.state::<AppState>();
-            let holds = state.holds.lock().unwrap();
-            win::send_keys(&actions::without_held(&vks, holds.held()))
-        }),
-        actions::Step::Hold(key) => hold(app, key),
-        actions::Step::HideCapsule => hide_capsule_until_snapshot(app),
+        actions::Step::SendKeys(keys) => keys::parse(keys)
+            .and_then(|vks| {
+                let state = app.state::<AppState>();
+                let holds = state.holds.lock().unwrap();
+                win::send_keys(&actions::without_held(&vks, holds.held()))
+            })
+            .map_err(|e| (Failure::Keys, e)),
+        actions::Step::Hold(key) => hold(app, key).map_err(|e| (Failure::Keys, e)),
+        // This fails only when there is no capsule window, and then no page to tell
+        actions::Step::HideCapsule => hide_capsule_until_snapshot(app).map(|mine| *hid = mine).map_err(|e| (Failure::Keys, e)),
         actions::Step::Show(target) => {
             let windows = win::app_windows();
             match windows.iter().find(|w| actions::belongs(target, &w.exe, w.family.as_deref())) {
                 Some(w) => win::bring_to_front(w.hwnd),
                 None => win::open(target), // it closed between the tap and now
             }
+            .map_err(|e| (Failure::Open, e))
         }
         actions::Step::Minimize(target) => {
             for w in win::app_windows().iter().filter(|w| actions::belongs(target, &w.exe, w.family.as_deref())) {
@@ -421,30 +504,75 @@ fn run_step(app: &AppHandle, step: actions::Step) {
             Ok(())
         }
     };
-    if let Err(why) = result {
-        applog(app, &format!("action failed: {step:?}: {why}"));
+    match result {
+        Err((failure, why)) => {
+            applog(app, &format!("action failed: {step:?}: {why}"));
+            Some(failure)
+        }
+        Ok(()) if to_admin => {
+            applog(app, &format!("action failed: {step:?}: the active window runs as administrator"));
+            Some(Failure::Admin)
+        }
+        Ok(()) => None,
+    }
+}
+
+/// Runs the steps of a tap on the item at `index` in the settings' list. A step that failed is
+/// told to the page, which says so beside the item's key. `age` is `items_age` at the tap: if the
+/// items have changed since, the place may hold another item, and nothing is said. A capsule
+/// hidden for a snapshot whose keys then failed comes back first: there is no selection to wait
+/// for, and the words would be gone before it returned.
+fn run_steps(app: &AppHandle, index: usize, age: u32, steps: Vec<actions::Step>) {
+    let state = app.state::<AppState>();
+    // The hide this tap made, if it made one: a failure ends that hide and no other tap's
+    let mut hid = None;
+    for step in steps {
+        let Some(failure) = run_step(app, step, &mut hid) else { continue };
+        // Keys that were sent, to a window that may have dropped them, did not fail to go
+        let unsent = hid.filter(|_| failure != actions::Failure::Admin);
+        if let (Some(mine), Some(hwnd)) = (unsent, app.get_webview_window("capsule").and_then(|w| w.hwnd().ok())) {
+            back_from_snapshot(app, hwnd.0 as isize, mine);
+        }
+        if state.items_age.load(Ordering::Relaxed) != age {
+            continue;
+        }
+        let russian = is_russian(&state.settings.lock().unwrap());
+        let (title, why) = failure_words(failure, russian);
+        let _ = app.emit("failed", json!({ "at": index, "title": title, "why": why }));
+    }
+}
+
+/// What the capsule says beside a key that did not work: two lines, in the panel's language.
+fn failure_words(failure: actions::Failure, russian: bool) -> (&'static str, &'static str) {
+    use actions::Failure;
+    match (failure, russian) {
+        (Failure::Keys, true) => ("Не сработало", "Windows не приняла нажатие"),
+        (Failure::Open, true) => ("Не сработало", "Не открылось"),
+        (Failure::Admin, true) => ("Не сработало", "Это окно запущено от администратора"),
+        (Failure::Keys, false) => ("Didn't work", "Windows did not accept the key press"),
+        (Failure::Open, false) => ("Didn't work", "Couldn't open it"),
+        (Failure::Admin, false) => ("Didn't work", "This window runs as administrator"),
     }
 }
 
 /// The page reports a tap on the item at `index` in the settings' list, or with no index on the
-/// last key, which opens the editor. The action runs off the main thread.
+/// gear in the capsule's foot, which opens the editor. The action runs off the main thread.
 #[tauri::command]
 fn tap(app: AppHandle, index: Option<usize>, pointer: String) {
     app.state::<AppState>().holds.lock().unwrap().touch(std::time::Instant::now());
     let Some(index) = index else {
-        applog(&app, &format!("tap: add pointer={pointer}"));
+        applog(&app, &format!("tap: settings pointer={pointer}"));
         // A window made from inside a command on the main thread would wait for itself
         std::thread::spawn(move || open_settings_window(&app));
         return;
     };
+    let age = app.state::<AppState>().items_age.load(Ordering::Relaxed);
     let item = app.state::<AppState>().settings.lock().unwrap().items.get(index).cloned();
     let Some(item) = item else { return };
     applog(&app, &format!("tap: item {} \"{}\" pointer={pointer}", index + 1, item.name));
     // A key to hold goes down or up here, on the thread of the taps, so quick taps keep their order
     if matches!(item.action, config::Action::Hold(_)) {
-        for step in actions::steps_for(&item.action, actions::Running::No) {
-            run_step(&app, step);
-        }
+        run_steps(&app, index, age, actions::steps_for(&item.action, actions::Running::No));
         return;
     }
     std::thread::spawn(move || {
@@ -458,21 +586,98 @@ fn tap(app: AppHandle, index: Option<usize>, pointer: String) {
         } else {
             actions::Running::Behind
         };
-        for step in actions::steps_for(&item.action, running) {
-            run_step(&app, step);
-        }
+        run_steps(&app, index, age, actions::steps_for(&item.action, running));
     });
 }
 
+/// The page opened or closed the two signs in the capsule's foot: the capsule is one sign longer
+/// while they show.
+#[tauri::command]
+fn foot(app: AppHandle, open: bool) {
+    let state = app.state::<AppState>();
+    if open {
+        state.holds.lock().unwrap().touch(std::time::Instant::now());
+    }
+    if state.signs.swap(open, Ordering::Relaxed) == open {
+        return;
+    }
+    let settings = state.settings.lock().unwrap().clone();
+    place_capsule(&app, &settings);
+}
+
+/// Folds or unfolds the capsule, or puts the folded key at `at` along its edge: in the settings,
+/// in the settings file, so it survives a restart, and on the screen.
+fn set_fold(app: &AppHandle, folded: bool, at: Option<f64>) {
+    let state = app.state::<AppState>();
+    // As the file will have it, so reading the file back changes nothing
+    let at = at.map(|at| config::share(at).as_f64().unwrap_or(at));
+    let settings = {
+        let mut s = state.settings.lock().unwrap();
+        s.folded = folded;
+        s.folded_at = at.unwrap_or(s.folded_at);
+        s.clone()
+    };
+    let saved = change_settings(app, |text| {
+        let text = config::with_field(text, "folded", json!(folded))?;
+        match at {
+            Some(at) => config::with_field(&text, "folded_at", config::share(at)),
+            None => Some(text),
+        }
+    });
+    if let Err(why) = saved {
+        applog(app, &format!("settings: cannot save the fold: {why}"));
+    }
+    applog(app, &format!("capsule: {}, along {:.3}", if folded { "folded" } else { "unfolded" }, settings.folded_at));
+    state.signs.store(false, Ordering::Relaxed);
+    place_capsule(app, &settings);
+    let _ = app.emit("reload", ());
+}
+
+/// A tap on the fold sign: the capsule becomes one key whose middle is where the sign was. Every
+/// held key is let go first; if one would not come up, the capsule stays open and says so.
+#[tauri::command]
+fn fold(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    state.holds.lock().unwrap().touch(std::time::Instant::now());
+    if !let_go_all(&app, "the capsule folds") {
+        let russian = is_russian(&state.settings.lock().unwrap());
+        let (title, why) = failure_words(actions::Failure::Keys, russian);
+        let _ = app.emit("failed", json!({ "at": null, "title": title, "why": why }));
+        return Err("a held key would not come up".into());
+    }
+    let settings = state.settings.lock().unwrap().clone();
+    let (work, k) = work_area(&app).ok_or("no screen")?;
+    let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
+    let shown = shown_now(&app, &settings.items).len();
+    let open = layout::window_rect_with(work, k, settings.top, cell, shown, settings.edge, true);
+    let at = layout::along_from(work, k, layout::fold_spot(open, k, settings.edge), settings.edge);
+    set_fold(&app, true, Some(at));
+    Ok(())
+}
+
+/// A touch of the folded key that reached the page: the capsule is back at its own place.
+#[tauri::command]
+fn unfold(app: AppHandle) {
+    app.state::<AppState>().holds.lock().unwrap().touch(std::time::Instant::now());
+    set_fold(&app, false, None);
+}
+
 /// Cuts the window down to what should be visible and take presses: the capsule's strip, plus the
-/// label's own rectangle while the label is open. The window itself keeps its size.
+/// label's own rectangle while the label is open. The window itself keeps its size. Of the window
+/// of a folded capsule only the pill with its key is left: the room around it, where its shadow
+/// was, would take the presses meant for what is under it.
 fn apply_region(app: &AppHandle, size: (i32, i32), edge: layout::Edge) {
     let Some(hwnd) = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize) else {
         return;
     };
     let state = app.state::<AppState>();
-    let open = state.card_open.load(Ordering::Relaxed) && state.carry.lock().unwrap().is_none();
+    let folded = state.settings.lock().unwrap().folded;
     let k = *state.px_per_css.lock().unwrap();
+    if folded {
+        win::set_region(hwnd, &[layout::folded_region(size, k, edge)]);
+        return;
+    }
+    let open = state.card_open.load(Ordering::Relaxed) && state.carry.lock().unwrap().is_none();
     let strip = layout::strip(size, k, edge);
     if open {
         win::set_region(hwnd, &[strip, *state.card_rect.lock().unwrap()]);
@@ -513,7 +718,11 @@ fn place_capsule(app: &AppHandle, settings: &config::Settings) {
     let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
     let k = mon.scale_factor() * settings.scale;
     let shown = shown_now(app, &settings.items).len();
-    let (x, y, width, height) = layout::window_rect(work, k, settings.top, cell, shown, settings.edge);
+    let (x, y, width, height) = if settings.folded {
+        layout::folded_window(work, k, settings.folded_at, settings.edge)
+    } else {
+        layout::window_rect_with(work, k, settings.top, cell, shown, settings.edge, state.signs.load(Ordering::Relaxed))
+    };
     let changed = *state.px_per_css.lock().unwrap() != k;
     *state.px_per_css.lock().unwrap() = k;
     if changed {
@@ -523,7 +732,14 @@ fn place_capsule(app: &AppHandle, settings: &config::Settings) {
     let _ = w.set_size(tauri::PhysicalSize::new(width, height));
     let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
     apply_region(app, (width, height), settings.edge);
-    grab::place(layout::grip_on_screen((x, y, width, height), k, settings.edge));
+    // Open, the capsule is carried by its handle; folded, by the folded key itself
+    grab::place(if settings.folded {
+        layout::folded_grip(work, k, settings.folded_at, settings.edge)
+    } else {
+        layout::grip_on_screen((x, y, width, height), k, settings.edge)
+    });
+    let _turn = state.showing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    grab::set_visible(state.wanted.load(Ordering::Relaxed) && !state.snapping.load(Ordering::Relaxed));
 }
 
 /// Work area of the primary monitor, `(x, y, width, height)` in physical px, and px per CSS px.
@@ -546,8 +762,8 @@ fn strip_now(app: &AppHandle) -> Option<(i32, i32, i32, i32)> {
     Some(layout::strip((size.width as i32, size.height as i32), k, edge))
 }
 
-/// Windows has started carrying the handle window (`grab`): the capsule comes off its edge and
-/// keeps its place relative to the handle. Everything the carry needs is measured here, once.
+/// Windows has started carrying the handle window (`grab`): the capsule, or the folded key, comes
+/// off its edge and keeps its place relative to the handle. Everything the carry needs is measured here, once.
 fn carry_begin(app: &AppHandle, handle: isize) {
     let state = app.state::<AppState>();
     let (Some(w), Some((work, k)), Some(strip)) = (app.get_webview_window("capsule"), work_area(app), strip_now(app)) else {
@@ -555,10 +771,14 @@ fn carry_begin(app: &AppHandle, handle: isize) {
     };
     let Ok(hwnd) = w.hwnd().map(|h| h.0 as isize) else { return };
     let (Some(capsule), Some(grip)) = (win::window_rect(hwnd), win::window_rect(handle)) else { return };
-    let items = state.settings.lock().unwrap().items.clone();
+    let (items, folded) = {
+        let s = state.settings.lock().unwrap();
+        (s.items.clone(), s.folded)
+    };
     let (cell, items) = (layout::cell(state.tablet.load(Ordering::Relaxed)), shown_now(app, &items).len());
     let offset = (capsule.0 - grip.0, capsule.1 - grip.1);
-    *state.carry.lock().unwrap() = Some(Carry { hwnd, offset, work, strip, k, cell, items });
+    let signs = state.signs.load(Ordering::Relaxed);
+    *state.carry.lock().unwrap() = Some(Carry { hwnd, offset, work, strip, k, cell, items, signs, folded });
     state.card_open.store(false, Ordering::Relaxed);
     let _ = app.emit("carry", ());
 }
@@ -575,7 +795,11 @@ fn carry_step(app: &AppHandle, x: i32, y: i32) -> (i32, i32) {
     let on_screen = (cx + sx, cy + sy, sw, sh);
     let edge = layout::drop_edge(c.work, c.k, on_screen);
     let along = layout::along_from(c.work, c.k, on_screen, edge);
-    let landing = layout::window_rect(c.work, c.k, along, c.cell, c.items, edge);
+    let landing = if c.folded {
+        layout::folded_window(c.work, c.k, along, edge)
+    } else {
+        layout::window_rect_with(c.work, c.k, along, c.cell, c.items, edge, c.signs)
+    };
     grab::show_slot(layout::pill_on_screen(landing, c.k, edge), (layout::RADIUS * c.k).round() as i32, c.hwnd);
     (cx - ox, cy - oy)
 }
@@ -594,36 +818,48 @@ fn change_settings(app: &AppHandle, change: impl FnOnce(&str) -> Option<String>)
     std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
 }
 
-/// The drag ended: the capsule docks. Dropped close to the top of the screen it lies down along
-/// the top edge; otherwise it goes to the nearer of the left and right edges at the height it was
-/// dropped at. The edge and the place along it go into the settings file, so they survive a
-/// restart.
-fn carry_end(app: &AppHandle) {
+/// A press on the handle window is over. `entered` says that Windows began to carry the window,
+/// `moved` is the farthest the window got, in physical px. A touch of the folded key, a press
+/// that carried it nowhere, brings the capsule back. Otherwise the drag ended and the capsule
+/// docks: dropped close to the top of the screen it lies down along the top edge; otherwise it
+/// goes to the nearer of the left and right edges at the height it was dropped at. The edge and
+/// the place along it, of the capsule or of the folded key, go into the settings file, so they
+/// survive a restart.
+fn carry_end(app: &AppHandle, entered: bool, moved: i32) {
     let state = app.state::<AppState>();
     let carried = state.carry.lock().unwrap().take();
+    let k = *state.px_per_css.lock().unwrap();
+    let folded = state.settings.lock().unwrap().folded;
+    if folded && layout::is_tap(entered, moved, k) {
+        state.holds.lock().unwrap().touch(std::time::Instant::now());
+        applog(app, "tap: the folded key");
+        let _ = app.emit("click", ());
+        set_fold(app, false, None);
+        return;
+    }
     let Some(Carry { hwnd, work, strip: (sx, sy, sw, sh), .. }) = carried else { return };
     let Some(at) = win::window_rect(hwnd) else {
         let _ = app.emit("reload", ());
         return;
     };
-    let k = *state.px_per_css.lock().unwrap();
     let on_screen = (at.0 + sx, at.1 + sy, sw, sh);
     let edge = layout::drop_edge(work, k, on_screen);
-    let top = layout::along_from(work, k, on_screen, edge);
+    let along = layout::along_from(work, k, on_screen, edge);
     let settings = {
         let mut s = state.settings.lock().unwrap();
         s.edge = edge;
-        s.top = top;
+        if folded {
+            // As the file will have it, so reading the file back changes nothing
+            s.folded_at = config::share(along).as_f64().unwrap_or(along);
+        } else {
+            s.top = along;
+        }
         s.clone()
     };
-    let saved = change_settings(app, |text| {
-        let text = config::with_field(text, "edge", json!(config::edge_name(edge)))?;
-        config::with_field(&text, "top", config::share(top))
-    });
-    if let Err(why) = saved {
+    if let Err(why) = change_settings(app, |text| config::with_landing(text, edge, folded, along)) {
         applog(app, &format!("settings: cannot save the capsule's place: {why}"));
     }
-    applog(app, &format!("moved: {edge:?} edge, along {top:.3}"));
+    applog(app, &format!("moved: {edge:?} edge, along {along:.3}{}", if folded { ", folded" } else { "" }));
     place_capsule(app, &settings);
     let _ = app.emit("reload", ());
 }
@@ -748,6 +984,47 @@ fn bundle_items(app: AppHandle, id: String, only_in: Option<String>, items: Vec<
     let bundle = config::BUNDLES.iter().find(|b| b.id == id).ok_or(format!("unknown set {id}"))?;
     let russian = is_russian(&app.state::<AppState>().settings.lock().unwrap());
     Ok(config::bundle_items(bundle, russian, only_in.as_deref(), &items))
+}
+
+/// A Windows file dialog of the settings window for key sets, which are `.tapka` files.
+fn key_set_dialog(app: &AppHandle, window: &tauri::WebviewWindow) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    use tauri_plugin_dialog::DialogExt;
+    app.dialog().file().set_parent(window).add_filter("Tapka", &["tapka"])
+}
+
+/// "Save my keys…": writes the items of the settings file, all of them or those for the program
+/// `only_in` names, into a file the user chooses; `name` is what the dialog offers to call it.
+/// Answers with the number of keys saved, or nothing when the dialog was closed. The errors
+/// `large` and `taken` are words the page has its own lines for.
+#[tauri::command(async)]
+fn save_key_set(app: AppHandle, window: tauri::WebviewWindow, name: String, only_in: Option<String>) -> Result<Option<usize>, String> {
+    let text = settings_path(&app).and_then(|path| std::fs::read_to_string(path).ok()).ok_or("cannot read settings")?;
+    let (text, keys) = config::set_text(&text, only_in.as_deref())?;
+    let Some(file) = key_set_dialog(&app, &window).set_file_name(format!("{name}.tapka")).blocking_save_file() else { return Ok(None) };
+    let chosen = file.into_path().map_err(|e| e.to_string())?;
+    let path = config::set_path(&chosen, |p| p.exists()).ok_or("taken")?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    Ok(Some(keys))
+}
+
+/// "Set from a file…": the user chooses a file, and its keys come back for the editor to show,
+/// with the file's name. Nothing of the file is run or looked up, and nothing is added yet.
+/// Answers with nothing when the dialog was closed, and with an error when it is not a key set.
+#[tauri::command(async)]
+fn open_key_set(app: AppHandle, window: tauri::WebviewWindow) -> Result<Option<Value>, String> {
+    let Some(file) = key_set_dialog(&app, &window).blocking_pick_file() else { return Ok(None) };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    let items = config::read_set(&path).ok_or("not a key set")?;
+    let name = path.file_stem().unwrap_or_default().to_string_lossy();
+    Ok(Some(json!({ "name": name, "items": items })))
+}
+
+/// What a set from a file adds to the editor's list: the items to put at its end, how many the
+/// list already has, and how many open something that is not on this machine.
+#[tauri::command(async)]
+fn key_set_items(set: Vec<Value>, items: Vec<Value>) -> Result<Value, String> {
+    let (added, had, missing) = config::set_items(&set, &items, apps::found).ok_or("not a key set")?;
+    Ok(json!({ "added": added, "had": had, "missing": missing }))
 }
 
 /// The programs that have windows right now, by name, for the editor's "Show only in" list: each
@@ -888,7 +1165,9 @@ fn open_settings_window(app: &AppHandle) {
         let _ = w.unminimize();
         let _ = w.show();
         if let Ok(hwnd) = w.hwnd() {
-            let _ = win::bring_to_front(hwnd.0 as isize);
+            if let Err(why) = win::bring_to_front(hwnd.0 as isize) {
+                applog(app, &format!("settings window: {why}"));
+            }
         }
         let _ = w.emit("section", "items");
         return;
@@ -907,7 +1186,9 @@ fn open_settings_window(app: &AppHandle) {
             // further down and to the right of the last one
             let _ = w.center();
             if let Ok(hwnd) = w.hwnd() {
-                let _ = win::bring_to_front(hwnd.0 as isize);
+                if let Err(why) = win::bring_to_front(hwnd.0 as isize) {
+                    applog(app, &format!("settings window: {why}"));
+                }
             }
         }
         Err(why) => applog(app, &format!("settings window: {why}")),
@@ -937,14 +1218,16 @@ fn set_capsule_visible(app: &AppHandle, visible: bool) {
         let_go_all(app, "the capsule was hidden");
     }
     let state = app.state::<AppState>();
+    // Asked for before the turn is taken: off the main thread the answer waits for the main
+    // thread, which may itself be waiting for the turn (the tray, a command of the page)
+    let hwnd = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize);
     let _turn = state.showing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     state.wanted.store(visible, Ordering::Relaxed);
     if visible && state.snapping.load(Ordering::Relaxed) {
         return;
     }
-    let Some(w) = app.get_webview_window("capsule") else { return };
-    if let Ok(hwnd) = w.hwnd() {
-        win::set_visible(hwnd.0 as isize, visible);
+    if let Some(hwnd) = hwnd {
+        win::set_visible(hwnd, visible);
         grab::set_visible(visible);
     }
 }
@@ -1022,6 +1305,9 @@ fn reload_settings(app: &AppHandle) {
         Some(why) => applog(app, &format!("settings: invalid file, items unchanged: {why}")),
         None => applog(app, &format!("settings: {} items", settings.items.len())),
     }
+    if settings.items != current.items {
+        state.items_age.fetch_add(1, Ordering::Relaxed);
+    }
     *state.settings.lock().unwrap() = settings.clone();
     *state.error.lock().unwrap() = error;
     apply_look(app, &settings);
@@ -1079,6 +1365,11 @@ fn follow_front(app: &AppHandle) {
     }
     let_go_all(app, "the active program changed");
     let settings = state.settings.lock().unwrap().clone();
+    // A folded capsule stays folded and says nothing; unfolded, it draws the keys of the program
+    // in front then
+    if settings.folded {
+        return;
+    }
     let now = actions::shown_items(&settings.items, program_ref(&front));
     if now == actions::shown_items(&settings.items, program_ref(&before)) {
         return;
@@ -1207,6 +1498,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_view,
             tap,
+            foot,
+            fold,
+            unfold,
             card,
             get_settings,
             set_pref,
@@ -1215,6 +1509,9 @@ fn main() {
             installed_apps,
             pinned_apps,
             bundle_items,
+            save_key_set,
+            open_key_set,
+            key_set_items,
             running_programs,
             icon_of,
             import_icon,
@@ -1247,6 +1544,8 @@ fn main() {
                 snapping: AtomicBool::new(false),
                 showing: Mutex::new(()),
                 holds: Mutex::new(actions::Holds::default()),
+                signs: AtomicBool::new(false),
+                items_age: std::sync::atomic::AtomicU32::new(0),
             });
             grab::start(app.handle().clone());
             let capsule = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize);

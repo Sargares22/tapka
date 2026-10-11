@@ -7,11 +7,15 @@
 //! title bar". Windows then moves that window itself, for every kind of pointer, and the capsule
 //! is kept at the same offset from it.
 //!
+//! A folded capsule has no handle of its own, so the same window lies over the folded key and
+//! carries it. It then takes every press on the key, and the page gets none: a press that ends
+//! without a carry is told to `crate::carry_end` as a touch.
+//!
 //! A second window, the slot, shows where the capsule would dock if it were let go now.
 //!
 //! Both windows live on their own thread with their own message loop.
 
-use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
 use std::sync::OnceLock;
 use tauri::AppHandle;
 use windows::core::{w, PCWSTR};
@@ -22,7 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, RegisterClassW, SetLayeredWindowAttributes, SetWindowPos,
     ShowWindowAsync, TranslateMessage, HTCAPTION, HWND_TOPMOST, LWA_ALPHA, MA_NOACTIVATE, MSG, SWP_NOACTIVATE, SWP_NOMOVE,
     SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_MOUSEACTIVATE, WM_MOVING,
-    WM_NCHITTEST, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    WM_NCHITTEST, WM_NCLBUTTONDOWN, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -41,6 +45,13 @@ pub fn set_accent(accent: &str) {
 /// How solid the slot is, out of 255.
 const SLOT_ALPHA: u8 = 70;
 
+/// The press now on the handle window: whether Windows began to carry the window, where the
+/// window stood then, and the farthest it got from there, in physical px. A carry that comes back
+/// to where it began has still been one.
+static CARRIED: AtomicBool = AtomicBool::new(false);
+static FROM: (AtomicI32, AtomicI32) = (AtomicI32::new(0), AtomicI32::new(0));
+static MOVED: AtomicI32 = AtomicI32::new(0);
+
 fn handle() -> HWND {
     HWND(HANDLE.load(Ordering::Relaxed) as _)
 }
@@ -54,7 +65,25 @@ unsafe extern "system" fn handle_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         // Every point of this window is a title bar: Windows carries it for any pointer
         WM_NCHITTEST => LRESULT(HTCAPTION as isize),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_NCLBUTTONDOWN => {
+            // Windows runs the whole carry inside this call. The release that ends a press with
+            // no carry does not reach the window, so the press is judged by how the call ended
+            CARRIED.store(false, Ordering::Relaxed);
+            let answer = DefWindowProcW(hwnd, msg, wparam, lparam);
+            if !CARRIED.load(Ordering::Relaxed) {
+                if let Some(app) = APP.get() {
+                    crate::carry_end(app, false, 0);
+                }
+            }
+            answer
+        }
         WM_ENTERSIZEMOVE => {
+            CARRIED.store(true, Ordering::Relaxed);
+            MOVED.store(0, Ordering::Relaxed);
+            if let Some((x, y, _, _)) = crate::win::window_rect(hwnd.0 as isize) {
+                FROM.0.store(x, Ordering::Relaxed);
+                FROM.1.store(y, Ordering::Relaxed);
+            }
             if let Some(app) = APP.get() {
                 crate::carry_begin(app, hwnd.0 as isize);
             }
@@ -68,12 +97,14 @@ unsafe extern "system" fn handle_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
                 let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
                 *rect = RECT { left: x, top: y, right: x + w, bottom: y + h };
             }
+            let far = (rect.left - FROM.0.load(Ordering::Relaxed)).abs().max((rect.top - FROM.1.load(Ordering::Relaxed)).abs());
+            MOVED.fetch_max(far, Ordering::Relaxed);
             LRESULT(1)
         }
         WM_EXITSIZEMOVE => {
             hide_slot();
             if let Some(app) = APP.get() {
-                crate::carry_end(app);
+                crate::carry_end(app, true, MOVED.load(Ordering::Relaxed));
             }
             LRESULT(0)
         }
@@ -135,8 +166,8 @@ pub fn start(app: AppHandle) {
     let _ = wait.recv_timeout(std::time::Duration::from_secs(2));
 }
 
-/// Lays the handle window over the capsule's handle, `(x, y, width, height)` on the screen in
-/// physical px, above the capsule. Placing never shows it: it is shown and hidden together with
+/// Lays the handle window over the capsule's handle, or over the folded key, `(x, y, width,
+/// height)` on the screen in physical px, above the capsule. Placing never shows it: it is shown and hidden together with
 /// the capsule by `set_visible` alone, so a capsule hidden for a screenshot keeps its handle
 /// hidden whatever is placed meanwhile.
 pub fn place(rect: (i32, i32, i32, i32)) {

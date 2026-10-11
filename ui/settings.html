@@ -274,7 +274,7 @@
       kind_action: 'Действие Windows', kind_action_sub: 'Снимок, вставка, диктовка, страницы Параметров',
       kind_open: 'Сайт или файл', kind_open_sub: 'Адрес сайта, документ или папка',
       kind_keys: 'Сочетание клавиш', kind_keys_sub: 'Например, Ctrl+Shift+S',
-      kind_bundle: 'Готовый набор', kind_bundle_sub: 'Сразу несколько клавиш: планшет, рисование, текст',
+      kind_bundle: 'Готовый набор', kind_bundle_sub: 'Сразу несколько клавиш: планшет, рисование, текст, видео',
       search: 'Найти программу', loading: 'Собираю список программ…', nothing: 'Ничего не найдено', pinned: 'На панели задач', all_apps: 'Все программы',
       g_common: 'Частые', g_windows: 'Окна', g_hold: 'Держать клавишу', g_pages: 'Страницы Параметров', g_sound: 'Звук и музыка',
       name: 'Название', hint: 'Подсказка на капсуле', hint_ph: 'Необязательно', site: 'Адрес сайта', site_ph: 'youtube.com', or_here: 'или с этого компьютера',
@@ -288,6 +288,11 @@
       only_in: 'Где показывать', only_everywhere: 'Везде', only_one: 'В одной программе', no_programs: 'Сейчас нет программ с окнами',
       pinned_none: 'Закреплённых не найдено', bundle_where: 'Где показывать клавиши набора', bundle_keys: 'Клавиш: ',
       bundle_added: 'Добавлено клавиш: ', bundle_none: 'Все клавиши набора уже есть в списке',
+      set_save: 'Сохранить мои клавиши…', set_load: 'Набор из файла…', set_all: 'Все клавиши', set_one: 'Клавиши одной программы',
+      set_file: 'Мои клавиши', set_saved: 'Сохранено клавиш: ', set_added: 'Добавлено ', set_had: '. Уже были: ', set_missing: '. Нет программы: ',
+      set_not: 'Это не набор клавиш Tapka',
+      set_large: 'Клавиш слишком много для одного файла: в набор входит не больше 200',
+      set_taken: 'Файл с таким именем и окончанием .tapka уже есть. Выберите другое имя',
     },
     en: {
       nav_items: 'Items', nav_look: 'Look', nav_general: 'General', nav_about: 'About',
@@ -319,7 +324,7 @@
       kind_action: 'Windows action', kind_action_sub: 'Snip, paste, dictation, Settings pages',
       kind_open: 'Website or file', kind_open_sub: 'A site address, a document or a folder',
       kind_keys: 'Keyboard shortcut', kind_keys_sub: 'For example, Ctrl+Shift+S',
-      kind_bundle: 'Ready set', kind_bundle_sub: 'Several keys at once: tablet, drawing, text',
+      kind_bundle: 'Ready set', kind_bundle_sub: 'Several keys at once: tablet, drawing, text, video',
       search: 'Find a program', loading: 'Listing the programs…', nothing: 'Nothing found', pinned: 'On the taskbar', all_apps: 'All programs',
       g_common: 'Common', g_windows: 'Windows', g_hold: 'Hold a key', g_pages: 'Settings pages', g_sound: 'Sound and music',
       name: 'Name', hint: 'Hint on the capsule', hint_ph: 'Optional', site: 'Site address', site_ph: 'youtube.com', or_here: 'or from this computer',
@@ -333,6 +338,11 @@
       only_in: 'Where to show', only_everywhere: 'Everywhere', only_one: 'In one program', no_programs: 'No program has a window right now',
       pinned_none: 'No pinned programs found', bundle_where: 'Where to show the keys of the set', bundle_keys: 'Keys: ',
       bundle_added: 'Keys added: ', bundle_none: 'Every key of the set is already in the list',
+      set_save: 'Save my keys…', set_load: 'Set from a file…', set_all: 'All keys', set_one: 'Keys of one program',
+      set_file: 'My keys', set_saved: 'Keys saved: ', set_added: 'Added ', set_had: '. Already there: ', set_missing: '. No program: ',
+      set_not: 'This is not a Tapka key set',
+      set_large: 'Too many keys for one file: a set holds 200 at most',
+      set_taken: 'A .tapka file with this name is already there. Choose another name',
     },
   };
   let S = null;            // what Rust last said about the settings
@@ -577,7 +587,11 @@
   const closeDialog = () => { $('shade').classList.remove('on'); steps = []; stopKeys(); };
   $('close').onclick = closeDialog;
   $('back').onclick = () => { stopKeys(); const back = steps.pop(); if (back) back(); };
-  $('shade').addEventListener('pointerdown', e => { if (e.target === $('shade')) closeDialog(); });
+  // A press beside the dialog closes it on the click, not on the press: closed on the press, the
+  // dialog was gone before the finger lifted, and the click fell on the row that had been under it
+  let beside = false;
+  $('shade').addEventListener('pointerdown', e => { beside = e.target === $('shade'); });
+  $('shade').addEventListener('click', e => { if (beside && e.target === $('shade')) closeDialog(); beside = false; });
   const field = (label, ...input) => el('div', { className: 'field' }, el('label', { textContent: label }), ...input);
   const text = (value, placeholder = '') => el('input', { type: 'text', value: value || '', placeholder, spellcheck: false });
   const btn = (key, onclick, kind = '') => el('button', { className: 'btn ' + kind, textContent: t(key), onclick });
@@ -662,8 +676,8 @@
   }
 
   // A Windows action or a page of Windows Settings, as tiles in groups
-  const GROUPS = [['g_common', ['snip', 'paste', 'copy', 'undo', 'redo', 'selectall', 'voice', 'keyboard', 'clipboard', 'emoji']],
-    ['g_windows', ['tasks', 'desktop', 'explorer', 'settings']], ['g_hold', ['holdshift', 'holdctrl', 'holdalt', 'holdspace']],
+  const GROUPS = [['g_common', ['snip', 'paste', 'copy', 'undo', 'redo', 'selectall', 'voice', 'keyboard', 'clipboard', 'emoji', 'esc', 'left', 'right', 'up', 'down', 'spacebar']],
+    ['g_windows', ['tasks', 'desktop', 'explorer', 'settings', 'fullscreen']], ['g_hold', ['holdshift', 'holdctrl', 'holdalt', 'holdspace']],
     ['g_pages', null], ['g_sound', ['volumeup', 'volumedown', 'mute', 'playpause', 'nexttrack']]];
   function addAction() {
     const grouped = GROUPS.flatMap(g => g[1] || []);
@@ -751,6 +765,9 @@
     const where = wherePicker(), gos = [];
     // While Rust answers, no set can be added again: both answers would start from the same list
     const busy = on => { for (const g of gos) g.disabled = on; };
+    const card = (name, items, go) => el('div', { className: 'group bundle' }, el('div', { className: 'set' },
+      el('div', { className: 'inline', style: 'gap:10px' }, el('span', { className: 'lbl' }, el('b', { className: 'ell', textContent: name }), el('small', { textContent: t('bundle_keys') + items.length })), go),
+      el('div', { className: 'icons' }, ...items.map(i => { const k = keyOf({ raw: i, glyph: S.glyphs[i.icon] }, 'small'); k.title = i.name; return k; }))));
     const blocks = S.bundles.map(b => {
       const go = btn('add', () => {
         if (where.missing()) return toast(t('need_program'));
@@ -763,11 +780,53 @@
         }).catch(e => toast(String(e))).finally(() => busy(false));
       });
       gos.push(go);
-      return el('div', { className: 'group bundle' }, el('div', { className: 'set' },
-        el('div', { className: 'inline', style: 'gap:10px' }, el('span', { className: 'lbl' }, el('b', { textContent: b.name }), el('small', { textContent: t('bundle_keys') + b.items.length })), go),
-        el('div', { className: 'icons' }, ...b.items.map(i => { const k = glyphKey(i.icon, 'small'); k.title = i.name; return k; }))));
+      return card(b.name, b.items, go);
     });
-    dialog(t('kind_bundle'), [field(t('bundle_where'), where.node), ...blocks]);
+    // A set from a file is one more card under the ready ones. Its keys stay for the programs the
+    // file names, so the choice above is not for them; Rust leaves out what the list already has
+    // and what is not on this machine, and the page says how many of each
+    const filed = el('div', { style: 'display:contents' });
+    const loadKeys = () => invoke('open_key_set').then(set => {
+      if (!set) return;
+      const go = btn('add', () => {
+        busy(true);
+        invoke('key_set_items', { set: set.items, items: raws() }).then(r => {
+          if (r.added.length) { closeDialog(); save([...raws(), ...r.added]); }
+          toast(t('set_added') + r.added.length + t('set_had') + r.had + t('set_missing') + r.missing);
+        }).catch(() => toast(t('set_not'))).finally(() => busy(false));
+      });
+      gos[S.bundles.length] = go;
+      filed.replaceChildren(card(set.name, set.items, go));
+      go.scrollIntoView({ block: 'nearest' });
+    }).catch(() => toast(t('set_not')));
+    // The user's own keys go into a file: all of them, or those of one of the programs that have
+    // keys of their own, by name. Rust opens the Windows dialog and writes the items only
+    const saving = el('div', { style: 'display:contents' });
+    const writeKeys = onlyIn => invoke('save_key_set', { name: t('set_file'), onlyIn }).then(n => {
+      if (n == null) return;
+      saving.replaceChildren();
+      toast(t('set_saved') + n);
+    }).catch(e => toast(T[lang]['set_' + e] ?? String(e)));
+    const saveKeys = () => {
+      const mine = S.items.filter(i => !i.problem);
+      if (!mine.length) return toast(t('empty'));
+      const progs = [...new Map(mine.map(i => [str(fields(i.raw).only_in).trim().toLowerCase(), i]).filter(([exe]) => exe)
+        .map(([exe, i]) => [exe, { name: i.only || exe.replace(/\.exe$/, ''), exe }])).values()];
+      if (!progs.length) return writeKeys(null);
+      let one = false, prog = '';
+      const seg = el('div', { className: 'seg' }), chips = el('div', { className: 'progs' });
+      const draw = () => {
+        seg.replaceChildren(...[['set_all', false], ['set_one', true]].map(([key, v]) => el('button', { className: one === v ? 'on' : '', textContent: t(key), onclick: () => { one = v; draw(); } })));
+        chips.hidden = !one;
+        chips.replaceChildren(...progs.map(p => el('button', { className: 'prog' + (p.exe === prog ? ' on' : ''), textContent: p.name, onclick: () => { prog = p.exe; draw(); } })));
+      };
+      draw();
+      const go = btn('save', () => one && !prog ? toast(t('need_program')) : writeKeys(one ? prog : null), 'acc');
+      saving.replaceChildren(el('div', { className: 'inline', id: 'set-save', style: 'align-items:flex-start' }, el('div', { style: 'flex:1' }, seg, chips), go));
+      go.scrollIntoView({ block: 'nearest' });
+    };
+    const tools = el('div', { className: 'inline', id: 'set-tools', style: 'flex-wrap:wrap' }, btn('set_save', saveKeys), btn('set_load', loadKeys));
+    dialog(t('kind_bundle'), [field(t('bundle_where'), where.node), ...blocks, filed, tools, saving]);
   }
 
   // ---------- an item's card: name, hint, what it does, its picture and where it shows; fields

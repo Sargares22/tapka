@@ -83,8 +83,9 @@
      others make room */
   .item.carried{z-index:2}
   .item.carried .key{transform:scale(1.12);background:var(--key-hot);box-shadow:inset 0 0 0 1.5px var(--accent),0 4px 10px rgba(0,0,0,.45)}
-  /* The plus that opens the editor is not a key: a small quiet mark in the foot of the pill, like
-     the bar of the handle at its head. The whole foot takes the press. */
+  /* The plus is not a key: a small quiet mark in the foot of the pill, like the bar of the handle
+     at its head. The whole foot takes the press. A tap on it puts two signs of the same look in
+     its place, the gear and the arrow to the edge, each as long as the plus. */
   .item.add{flex:0 0 38px}
   .item.add .key{width:46px;height:30px;border-radius:11px;background:none;color:var(--ink-dim)}
   .item.add .key svg{width:20px;height:20px}
@@ -123,6 +124,18 @@
   body[data-edge="top"] .item.on::after{right:auto;left:50%;top:1.5px;width:14px;height:3px;transform:translateX(-50%)}
   body[data-edge="top"] #card{right:auto;top:70px;transform:translateX(-50%)}
   body[data-edge="top"].dragging #pill{border-radius:22px;transform:translateY(8px) scale(1.03)}
+  /* Folded: a short pill with one key, lit by the accent, and no handle and no plus. The window is
+     that pill and the room for its shadow; Windows carries it, the way it carries the capsule. */
+  body.folded #grip{display:none}
+  body.folded #pill{bottom:auto;height:60px}
+  /* Carried, the folded key keeps its place and size: its window shows the strip and no more,
+     and a strip that moved aside or grew would be cut */
+  body.folded.dragging #pill,body[data-edge].folded.dragging #pill{transform:none}
+  body[data-edge="top"].folded #pill{right:auto;width:60px}
+  body.folded #keys{padding:0}
+  .item.unfold{flex:1 1 auto}
+  .item.unfold .key{background:color-mix(in srgb,var(--accent) 24%,var(--key));box-shadow:inset 0 0 0 1.5px var(--accent);color:var(--ink)}
+  .item.unfold.hot .key,.item.unfold.down .key{background:color-mix(in srgb,var(--accent) 36%,var(--key))}
   @media (prefers-reduced-motion: reduce){#pill,.key,#grip::after{transition:none}}
 </style>
 </head>
@@ -134,9 +147,12 @@
   const keys = document.getElementById('keys');
   const grip = document.getElementById('grip');
   const card = document.getElementById('card');
+  const pill = document.getElementById('pill');
   const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
-  const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8, EDGE = 22, EDGE_STEP = 6, NOTE_MS = 2000, APPEAR_MS = 180, FLASH_MS = 140;
+  const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8, EDGE = 22, EDGE_STEP = 6, NOTE_MS = 2000, FAILED_MS = 2500, APPEAR_MS = 180, FLASH_MS = 140, SIGNS_MS = 4000, PEEK = 18;
   let shown = [];
+  // The capsule is folded into one key
+  let folded = false;
   let tablet = false;
   // A quiet click on a tap, if the settings ask for it
   let sound = false;
@@ -186,8 +202,74 @@
     img.replaceWith(sign);
   }
 
-  // One key per item: its picture if it has one, otherwise the first letter of the name. After
-  // the items comes one more key, which opens the editor.
+  // The key of `shown[i]`: its picture if it has one, otherwise the first letter of the name
+  function button(i) {
+    const it = shown[i];
+    const b = document.createElement('button');
+    b.className = 'item' + (it.on ? ' on' : '') + (it.live ? ' live' : '') + (it.held ? ' held' : '') + (it.add ? ' add' : '') + (it.unfold ? ' unfold' : '');
+    b.dataset.i = i;
+    const key = document.createElement('span');
+    key.className = 'key';
+    if (it.glyph) {
+      // A built-in icon is the panel's own SVG; inline, it is drawn in the ink of the theme
+      key.innerHTML = it.glyph;
+    } else if (it.icon) {
+      const img = document.createElement('img');
+      img.onload = () => legible(img);
+      img.src = it.icon;
+      img.alt = it.name;
+      key.append(img);
+    } else {
+      key.textContent = [...it.name][0].toUpperCase();
+    }
+    b.append(key);
+    return b;
+  }
+
+  // The foot of the pill. At rest it is the plus. A tap on the plus puts two signs in its place,
+  // the gear, which opens the settings window, and the arrow, which folds the capsule; the
+  // capsule is one sign longer meanwhile, and Rust is told so it sizes the window. SIGNS_MS
+  // after the last touch of a sign, or after a touch of any key, the plus is back.
+  let signs = false, signsTimer = null, closing = false;
+  // Rust says how long the pill is with the plus and with the two signs, and sizes the window for
+  // the same length. The pill is drawn that long whatever the window is at the moment: the window
+  // is resized a moment before or after the foot is drawn, and a pill that followed it would
+  // squeeze the list for that moment and throw the gear a sign's length out of its place.
+  let lengths = null;
+  function stretch() {
+    if (!lengths) return;
+    const long = folded ? '' : lengths[signs ? 1 : 0] + 'px';
+    pill.style.height = flat() ? '' : long;
+    pill.style.width = flat() ? long : '';
+  }
+  function drawFoot() {
+    for (const b of keys.querySelectorAll('.item.add')) b.remove();
+    const plus = shown.length - 3;
+    keys.append(...(signs ? [plus + 1, plus + 2] : [plus]).map(button));
+    stretch();
+  }
+  function waitForSigns() {
+    clearTimeout(signsTimer);
+    signsTimer = setTimeout(() => press ? waitForSigns() : closeSigns(), SIGNS_MS);
+  }
+  // The foot grows before the window does and shrinks after it; the pill has its own length
+  // (see stretch), so the list and the first sign stay where they are meanwhile
+  function openSigns() {
+    signs = true;
+    drawFoot();
+    waitForSigns();
+    invoke('foot', { open: true });
+  }
+  function closeSigns() {
+    clearTimeout(signsTimer);
+    if (!signs || closing) return;
+    closing = true;
+    const done = () => { closing = false; if (!signs) return; signs = false; if (!folded) drawFoot(); };
+    invoke('foot', { open: false }).then(done, done);
+  }
+
+  // One key per item. After the items comes the foot, which is not one of them. A folded capsule
+  // is a single key, which brings the capsule back.
   function render(view) {
     hideCard();
     tablet = view.tablet;
@@ -196,34 +278,28 @@
     paint();
     document.documentElement.style.setProperty('--accent', view.accent);
     document.body.dataset.edge = view.edge;
+    folded = !!view.folded;
+    document.body.classList.toggle('folded', folded);
+    lengths = view.pill;
+    if (folded) {
+      clearTimeout(signsTimer);
+      signs = setChange = false;
+      stretch();
+      before = [];
+      shown = [{ name: '', glyph: view.unfold, unfold: true }];
+      list.replaceChildren();
+      keys.replaceChildren(button(0));
+      return;
+    }
     list.style.setProperty('--cell', view.cell + 'px');
-    shown = [...view.items, { name: view.add[0], hint: view.add[1], glyph: PLUS, add: true }];
+    shown = [...view.items, { name: view.add[0], hint: view.add[1], glyph: PLUS, add: true, sign: 'plus' },
+      { ...view.gear, add: true, sign: 'gear' }, { ...view.fold, add: true, sign: 'fold' }];
     const fresh = setChange ? view.items.filter(it => !before.includes(it.at)).map(it => it.at) : [];
     before = view.items.map(it => it.at);
-    const made = shown.map((it, i) => {
-      const b = document.createElement('button');
-      b.className = 'item' + (it.on ? ' on' : '') + (it.live ? ' live' : '') + (it.held ? ' held' : '') + (it.add ? ' add' : '');
-      b.dataset.i = i;
-      const key = document.createElement('span');
-      key.className = 'key';
-      if (it.glyph) {
-        // A built-in icon is the panel's own SVG; inline, it is drawn in the ink of the theme
-        key.innerHTML = it.glyph;
-      } else if (it.icon) {
-        const img = document.createElement('img');
-        img.onload = () => legible(img);
-        img.src = it.icon;
-        img.alt = it.name;
-        key.append(img);
-      } else {
-        key.textContent = [...it.name][0].toUpperCase();
-      }
-      b.append(key);
-      return b;
-    });
-    const add = made.pop();
+    const made = view.items.map((it, i) => button(i));
     list.replaceChildren(...made);
-    keys.replaceChildren(list, add);
+    keys.replaceChildren(list);
+    drawFoot();
     fades();
     if (setChange) {
       // The list goes back to its start, where the first keys stand still and the program's keys
@@ -280,21 +356,39 @@
   // The name label: opens after a long press or a hover, closes on release, leave or a press elsewhere
   let cardTimer = null;
   let cardFor = null;
+  // The label says that a key did not work: the cursor passing over the keys does not take it away
+  let failing = false;
   function showCard(b) {
     const it = shown[Number(b.dataset.i)];
     openCard(b, it.name, it.hint);
   }
-  // The same label, level with `anchor`: an item, or the whole list for a note about the keys
+  // The same label, level with `anchor`: an item, or the whole list for a note about the keys.
+  // A folded capsule shows no label of any kind.
   function openCard(anchor, title, sub) {
+    failing = false;
+    if (folded) return;
     card.querySelector('.c-title').textContent = title;
     card.querySelector('.c-sub').textContent = sub || '';
     cardFor = anchor;
     card.hidden = false;
     placeCard();
-    // Only the label's own rectangle, with room for its shadow, is let through the window
+    letThrough();
+  }
+  // Only the label's own rectangle, with room for its shadow, is let through the window
+  function letThrough() {
     const r = card.getBoundingClientRect();
     invoke('card', { open: true, rect: [r.left - 14, r.top - 14, r.width + 28, r.height + 28] });
   }
+  // The list scrolled under an open label: the label goes with its key, and closes once the key
+  // has left the part of the list that shows
+  list.addEventListener('scroll', () => {
+    if (card.hidden || !cardFor || cardFor.parentElement !== list) return;
+    const r = cardFor.getBoundingClientRect(), box = list.getBoundingClientRect();
+    const [mid, from, to] = flat() ? [r.left + r.width / 2, box.left, box.right] : [r.top + r.height / 2, box.top, box.bottom];
+    if (mid < from || mid > to) return hideCard();
+    placeCard();
+    letThrough();
+  }, { passive: true });
   // The label is centred on its key but stays inside the window
   function placeCard() {
     if (!cardFor) return;
@@ -310,6 +404,7 @@
   function hideCard() {
     clearTimeout(cardTimer);
     cardTimer = null;
+    failing = false;
     if (card.hidden) return;
     cardFor = null;
     card.hidden = true;
@@ -322,6 +417,22 @@
   // LONG_PRESS_MS, the press shows the name label instead of running the action; moved after
   // that, the key is carried to another place among the keys and the release leaves it there. The
   // mouse wheel scrolls. The capsule is moved by its handle only.
+  // A key the fading end of the list hides by more than a third is not there to be tapped: a
+  // touch of it runs nothing and brings it into view instead (see reveal).
+  function veiled(b) {
+    const r = b.querySelector('.key').getBoundingClientRect(), box = list.getBoundingClientRect(), fade = getComputedStyle(list);
+    const [from, to, near, far] = flat() ? [r.left, r.right, box.left, box.right] : [r.top, r.bottom, box.top, box.bottom];
+    const clear = Math.min(to, far - parseFloat(fade.getPropertyValue('--after'))) - Math.max(from, near + parseFloat(fade.getPropertyValue('--before')));
+    return clear < (to - from) * 2 / 3;
+  }
+  // The list scrolls until the key stands whole, PEEK from the end it was hidden at: where the
+  // last key that shows stands when the list is at rest (`PEEK` in layout.rs)
+  function reveal(b) {
+    const r = b.getBoundingClientRect(), box = list.getBoundingClientRect();
+    const [from, to, near, far] = flat() ? [r.left, r.right, box.left, box.right] : [r.top, r.bottom, box.top, box.bottom];
+    const by = from + to > near + far ? to - (far - PEEK) : from - (near + PEEK);
+    list.scrollBy({ [flat() ? 'left' : 'top']: by, behavior: calm.matches ? 'auto' : 'smooth' });
+  }
   let press = null;
   const lift = () => { for (const b of keys.querySelectorAll('.down')) b.classList.remove('down'); };
   const keyAt = i => keys.querySelector(`.item[data-i="${i}"]`);
@@ -332,13 +443,19 @@
     press = {
       id: e.pointerId, index: b ? Number(b.dataset.i) : -1, item: b ? shown[Number(b.dataset.i)] : null, x: e.clientX, y: e.clientY,
       scroll: flat() ? list.scrollLeft : list.scrollTop, mouse: e.pointerType === 'mouse', long: false, scrolling: false,
+      veiled: !!b && b.parentElement === list && veiled(b),
     };
     try { keys.setPointerCapture(e.pointerId); } catch (_) {}
-    if (!b) return;
+    // A veiled key does not dip, shows no label and is not carried
+    if (!b || press.veiled) return;
     b.classList.add('down');
+    // A touch of a sign keeps the signs up for their time again
+    if (signs && press.item.sign) waitForSigns();
     cardTimer = setTimeout(() => {
       if (!press) return;
       press.long = true;
+      // The folded key has no label
+      if (press.item.unfold) return;
       showCard(b);
       // Should the release never reach the page, the label still does not stay for good
       cardTimer = setTimeout(drop, LABEL_STAYS_MS);
@@ -390,6 +507,12 @@
     const p = press;
     if (p.carry) return carry(p, e);
     if (!p.scrolling && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP) return;
+    // The folded key is carried by Windows, through the handle window that lies over it: a press
+    // that reached the page and moved is nothing
+    if (p.item && p.item.unfold) {
+      p.scrolling = true;
+      return lift();
+    }
     // A key that moves after its label came up is being carried to another place
     if (p.long && !p.scrolling && p.item && !p.item.add) return carry(p, e);
     if (p.mouse) return;
@@ -408,25 +531,45 @@
     press = null;
     lift();
     hideCard();
+    const it = p.item, still = !p.scrolling && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP;
+    if (it && it.unfold) {
+      // Touched and not moved, however long, it brings the capsule back. The handle window
+      // over the key takes its presses, so this is for a press that got past it
+      if (still) { click(); invoke('unfold'); }
+      return afterPress();
+    }
     if (p.carry) {
       const c = p.carry, moved = c.to !== c.from;
       settle(c, moved);
       // Rust is told the places in the settings file; its reload draws the keys in the new order
       if (moved) invoke('move_item', { from: shown[c.from].at, to: shown[c.to].at }).catch(() => redraw());
     }
-    const tap = !p.scrolling && !p.long && p.index >= 0 && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP && keyAt(p.index);
-    if (tap) {
+    const tap = still && !p.long && p.index >= 0 && keyAt(p.index);
+    if (tap && p.veiled) reveal(keyAt(p.index));
+    else if (tap) {
       flash(keyAt(p.index));
       click();
-      // Rust is told the item's place in the settings file; the plus has none
-      const it = p.item;
-      invoke('tap', { index: it.add ? null : it.at, pointer: e.pointerType || 'unknown' });
+      // The plus opens the signs and the arrow folds the capsule. For anything else Rust is told
+      // the item's place in the settings file; the gear has none
+      if (it.sign === 'plus') openSigns();
+      else if (it.sign === 'fold') invoke('fold').catch(() => {});
+      else invoke('tap', { index: it.add ? null : it.at, pointer: e.pointerType || 'unknown' });
     }
+    // A touch of any key puts the plus back
+    if (signs && it && !it.add) closeSigns();
     afterPress();
   }
   window.addEventListener('pointerup', release);
-  // The press was taken away without a release: nothing stays pressed and no label stays open
-  const drop = () => { if (press && press.carry) settle(press.carry, false); press = null; lift(); hideCard(); afterPress(); };
+  // The press was taken away without a release: nothing stays pressed and no label stays open.
+  // With no press there is nothing to take away: a label put up after the release stays.
+  const drop = () => {
+    if (!press) return;
+    if (press.carry) settle(press.carry, false);
+    press = null;
+    lift();
+    hideCard();
+    afterPress();
+  };
   window.addEventListener('pointercancel', drop);
   keys.addEventListener('lostpointercapture', drop);
 
@@ -445,10 +588,10 @@
     if (hot) hot.classList.remove('hot');
     hot = b;
     if (press) return;
-    hideCard();
+    if (!failing) hideCard();
     if (!b) return;
     b.classList.add('hot');
-    if (!tablet) cardTimer = setTimeout(() => showCard(b), HOVER_MS);
+    if (!tablet && !failing) cardTimer = setTimeout(() => showCard(b), HOVER_MS);
   }
   keys.addEventListener('pointerdown', e => {
     afterTouch = e.pointerType !== 'mouse';
@@ -474,6 +617,24 @@
     for (const b of list.children) b.classList.toggle('held', e.payload.includes(shown[Number(b.dataset.i)].at));
   });
 
+  // A tap did not do what its key is for. Rust names the item by its place in the settings file
+  // and gives two lines, the second the reason; they show beside the key, the way its label does,
+  // for FAILED_MS. A later failure takes the place of an earlier one, and its time starts anew.
+  // While a key is held the words wait for the release, which would otherwise close them at once.
+  // A capsule that could not fold says so beside its foot: that failure names no item.
+  let failed = null;
+  function fail(f) {
+    failed = press ? f : null;
+    if (press || folded) return;
+    const anchor = f.at == null ? keys.querySelector('.item.add:last-child') : keyAt(shown.findIndex(it => it.at === f.at));
+    if (!anchor) return;
+    clearTimeout(cardTimer);
+    openCard(anchor, f.title, f.why);
+    failing = true;
+    cardTimer = setTimeout(hideCard, FAILED_MS);
+  }
+  window.__TAURI__.event.listen('failed', e => fail(e.payload));
+
   // The active program brought its own items or took them away. The first time in a start a
   // program brings its items, Rust also sends a few words about whose keys they are: they show
   // for a moment beside the list, the way a key's label does.
@@ -485,22 +646,26 @@
   function putOff(set, note) {
     later = { set: set || !!(later && later.set), note: note || (later && later.note) || null };
   }
-  function redraw(set = false, note = null) {
+  // Resolves once the keys are drawn, or put off again.
+  async function redraw(set = false, note = null) {
     if (press) return putOff(set, note);
-    invoke('get_view').then(view => {
-      if (press) return putOff(set, note);
-      setChange = setChange || set;
-      render(view);
-      if (!note) return;
-      openCard(list, note, '');
-      cardTimer = setTimeout(hideCard, NOTE_MS);
-    });
+    const view = await invoke('get_view');
+    if (press) return putOff(set, note);
+    setChange = setChange || set;
+    render(view);
+    if (!note) return;
+    openCard(list, note, '');
+    cardTimer = setTimeout(hideCard, NOTE_MS);
   }
+  // The drawing that was put off comes first: drawing closes any label, so the words about a key
+  // that did not work come up after it, beside the key as it stands then.
   function afterPress() {
-    if (!later) return;
+    const f = failed;
+    failed = null;
+    if (!later) return f && fail(f);
     const { set, note } = later;
     later = null;
-    redraw(set, note);
+    redraw(set, note).then(() => f && fail(f));
   }
   window.__TAURI__.event.listen('set', e => redraw(true, e.payload));
 
@@ -512,6 +677,8 @@
     hideCard();
     document.body.classList.add('dragging');
   });
+  // A touch of the folded key is taken by the handle window over it: Rust says so, for the click
+  window.__TAURI__.event.listen('click', click);
   window.__TAURI__.event.listen('reload', () => {
     document.body.classList.remove('dragging');
     redraw();

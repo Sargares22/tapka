@@ -10,15 +10,16 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POI
 use windows::Win32::Globalization::GetUserDefaultUILanguage;
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Storage::Packaging::Appx::GetPackageFamilyName;
+use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::Threading::{
-    GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_SYNCHRONIZE,
+    AttachThreadInput, GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, WaitForSingleObject, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
 };
 use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_OR};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, InternalGetWindowText, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
+    BringWindowToTop, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, InternalGetWindowText, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
     GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindowAsync,
-    GWL_EXSTYLE, WS_EX_APPWINDOW, GW_OWNER, WM_NCACTIVATE, WM_NCPAINT, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_MINIMIZE, SW_RESTORE, WS_EX_TOOLWINDOW,
+    GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, WS_EX_APPWINDOW, GW_OWNER, WM_NCACTIVATE, WM_NCPAINT, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_MINIMIZE, SW_RESTORE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     SM_CONVERTIBLESLATEMODE, SW_HIDE, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
 };
 
@@ -67,20 +68,22 @@ pub fn send_keys(vks: &[u16]) -> Result<(), String> {
         .chain(vks.iter().rev().map(|&vk| key_input(vk, true)))
         .collect();
     let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) } as usize;
-    if sent == inputs.len() {
-        Ok(())
-    } else {
-        Err(format!("SendInput accepted {sent} of {} events", inputs.len()))
-    }
+    all_taken(sent, inputs.len())
 }
 /// Presses one key and leaves it down, or lets it go: what a `hold` item does, the same way as
 /// `send_keys`.
 pub fn send_key(vk: u16, up: bool) -> Result<(), String> {
-    let sent = unsafe { SendInput(&[key_input(vk, up)], std::mem::size_of::<INPUT>() as i32) };
-    if sent == 1 {
+    let sent = unsafe { SendInput(&[key_input(vk, up)], std::mem::size_of::<INPUT>() as i32) } as usize;
+    all_taken(sent, 1)
+}
+
+/// SendInput says how many of the events it took. Anything short of all of them is a failure:
+/// none when another program blocks input, a part when the batch was cut short.
+fn all_taken(sent: usize, events: usize) -> Result<(), String> {
+    if sent == events {
         Ok(())
     } else {
-        Err("SendInput refused the key".into())
+        Err(format!("SendInput accepted {sent} of {events} events"))
     }
 }
 /// Hides or shows a window without activating it. `hwnd` is the raw handle.
@@ -153,6 +156,68 @@ pub fn front_program() -> Option<(String, Option<String>)> {
         return None;
     }
     program_of_process(shown_by(hwnd, pid)?)
+}
+
+/// Whether a program runs with raised rights, "as administrator".
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Rights {
+    Raised,
+    Plain,
+    /// Windows would not say.
+    Unknown,
+}
+
+/// The rights of the program whose window is active. Windows may drop keys sent to a window of a
+/// program with rights above the sender's, and says nothing; this is how the panel can tell the
+/// person why. A call that fails gives `Unknown`, never `Raised`.
+pub fn front_rights() -> Rights {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() {
+        return Rights::Unknown;
+    }
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    rights_of_process(pid)
+}
+
+/// The rights the panel itself runs with.
+pub fn own_rights() -> Rights {
+    rights_behind(unsafe { GetCurrentProcess() })
+}
+
+/// Whether the active window's program is known to have rights above the panel's: it runs raised
+/// and the panel is known not to. With either of the two unknown there is nothing to say.
+pub fn rights_above(front: Rights, own: Rights) -> bool {
+    front == Rights::Raised && own == Rights::Plain
+}
+
+fn rights_of_process(pid: u32) -> Rights {
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return Rights::Unknown };
+        let rights = rights_behind(process);
+        let _ = CloseHandle(process);
+        rights
+    }
+}
+
+/// The same for a process that is already open.
+fn rights_behind(process: HANDLE) -> Rights {
+    unsafe {
+        let mut token = HANDLE::default();
+        if OpenProcessToken(process, TOKEN_QUERY, &mut token).is_err() {
+            return Rights::Unknown;
+        }
+        let mut raised = TOKEN_ELEVATION::default();
+        let mut len = 0u32;
+        let size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+        let read = GetTokenInformation(token, TokenElevation, Some(&mut raised as *mut TOKEN_ELEVATION as *mut _), size, &mut len);
+        let _ = CloseHandle(token);
+        match read {
+            Ok(()) if raised.TokenIsElevated != 0 => Rights::Raised,
+            Ok(()) => Rights::Plain,
+            Err(_) => Rights::Unknown,
+        }
+    }
 }
 
 fn class_of(hwnd: HWND) -> String {
@@ -344,21 +409,37 @@ pub fn foreground() -> isize {
 }
 
 /// Brings a window to the front, restoring it first if it is minimized. Windows lets a program
-/// that is not in front do this only right after it has sent input, so a lone Alt is tapped
-/// first: the usual way around the foreground lock.
+/// that is not in front do this only on behalf of the one that is, so this thread joins the input
+/// of the active window's thread for the call. No key is sent: a tapped Alt opens the menu of the
+/// window in front, and one held across the change may never come up.
 pub fn bring_to_front(hwnd: isize) -> Result<(), String> {
     let window = HWND(hwnd as _);
     unsafe {
         if IsIconic(window).as_bool() {
             let _ = ShowWindowAsync(window, SW_RESTORE);
         }
-        let alt = [key_input(0x12, false), key_input(0x12, true)];
-        SendInput(&alt, std::mem::size_of::<INPUT>() as i32);
-        if SetForegroundWindow(window).as_bool() {
-            Ok(())
-        } else {
-            Err("Windows refused to bring the window to the front".into())
+        // Windows does not let this thread join a window of a program with rights above the
+        // panel's; the call is tried all the same
+        let (me, other) = (GetCurrentThreadId(), GetWindowThreadProcessId(GetForegroundWindow(), None));
+        let joined = other != 0 && other != me && AttachThreadInput(me, other, true).as_bool();
+        let front = SetForegroundWindow(window).as_bool();
+        if front {
+            let _ = BringWindowToTop(window);
         }
+        if joined {
+            let _ = AttachThreadInput(me, other, false);
+        }
+        if front {
+            return Ok(());
+        }
+        // Refused: the window is at least put above the others, where it is seen. One that stays
+        // above the others by itself is raised among those and keeps staying above
+        let stays_above = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0;
+        let _ = SetWindowPos(window, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        if !stays_above {
+            let _ = SetWindowPos(window, Some(HWND_NOTOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+        Err("Windows refused to bring the window to the front".into())
     }
 }
 
@@ -451,6 +532,35 @@ pub fn shown(wanted: &[(String, String)]) -> Vec<bool> {
     }
     scan.found
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keys_windows_took_none_or_a_part_of_are_a_failure() {
+        assert!(all_taken(0, 1).is_err());
+        assert!(all_taken(0, 6).is_err());
+        assert!(all_taken(5, 6).is_err());
+    }
+
+    #[test]
+    fn a_window_is_above_the_panel_only_when_both_rights_are_known() {
+        assert!(rights_above(Rights::Raised, Rights::Plain));
+        // The panel could not read its own rights, or runs raised itself: no such reason is given
+        assert!(!rights_above(Rights::Raised, Rights::Unknown));
+        assert!(!rights_above(Rights::Raised, Rights::Raised));
+        assert!(!rights_above(Rights::Unknown, Rights::Plain));
+        assert!(!rights_above(Rights::Plain, Rights::Plain));
+    }
+
+    #[test]
+    fn rights_windows_would_not_tell_are_unknown_not_raised() {
+        // No process has the number 0 for a program to open, and no handle is 0
+        assert_eq!(rights_of_process(0), Rights::Unknown);
+        assert_eq!(rights_behind(HANDLE::default()), Rights::Unknown);
+    }
+}
+
 #[cfg(test)]
 mod live {
     use super::*;

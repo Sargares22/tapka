@@ -55,8 +55,12 @@ pub const SHOWN: usize = 4;
 /// How much of the next item shows past the last shown one when there are more.
 pub const PEEK: f64 = 18.0;
 
-/// The foot of the pill, where the small plus that opens the editor sits.
+/// The foot of the pill, where the small plus sits. A tap on the plus opens two signs in its
+/// place, the gear and the fold arrow, each as long as the plus: the pill is one `ADD` longer
+/// while they show.
 pub const ADD: f64 = 38.0;
+/// Length of the pill of a folded capsule: one key, as far from the pill's ends as from its sides.
+pub const FOLDED: f64 = 60.0;
 
 /// Length of the pill for `n` items when nothing limits it: the handle, the items that show, the
 /// peek of the next one if there is one, and the foot with the plus.
@@ -65,31 +69,99 @@ pub fn pill_height(n: usize, cell: f64) -> f64 {
     GRIP + n.min(SHOWN) as f64 * cell + peek + ADD + END
 }
 
+/// Length of the pill along its edge, in CSS px: as long as `pill_height` says, one sign longer
+/// while the two signs show in the foot in place of the plus (`signs`), and no longer than fits in
+/// the work area. `work` is the work area `(x, y, width, height)` in physical px, `k` is physical
+/// px per CSS px. The page draws the pill this long and the window is sized for it, so neither
+/// waits for the other when the signs open or close.
+pub fn pill_length(work: (i32, i32, i32, i32), k: f64, cell: f64, n: usize, edge: Edge, signs: bool) -> f64 {
+    let more = if signs { ADD } else { 0.0 };
+    let span = if edge == Edge::Top { work.2 } else { work.3 };
+    let room = (span as f64 / k - 2.0 * ROOM - MARGIN).max(pill_height(0, cell) + more);
+    (pill_height(n, cell) + more).min(room)
+}
+
 /// Where the capsule window goes, in physical px: `(x, y, width, height)`.
 /// `work` is the work area `(x, y, width, height)` in physical px, `k` is physical px per CSS px
 /// (monitor scale × panel scale). `along` is where the pill starts along its edge, as a share of
 /// the work area: its top edge for an upright capsule, its left end for a flat one.
-/// The pill is as long as `pill_height` says. Where that is more than fits between `along` and the
+/// The pill is as long as `pill_length` says. Where that is more than fits between `along` and the
 /// end of the work area, the window is pulled back along the edge until the whole pill shows; only a
 /// pill longer than the work area itself is cut short, and then the list scrolls inside it.
-pub fn window_rect(work: (i32, i32, i32, i32), k: f64, along: f64, cell: f64, n: usize, edge: Edge) -> (i32, i32, i32, i32) {
+/// `signs` says that the two signs show in the foot in place of the plus.
+pub fn window_rect_with(work: (i32, i32, i32, i32), k: f64, along: f64, cell: f64, n: usize, edge: Edge, signs: bool) -> (i32, i32, i32, i32) {
     let (wx, wy, ww, wh) = work;
     let along = if along.is_finite() { along.clamp(0.0, 1.0) } else { 0.0 };
-    let full = pill_height(n, cell);
-    let least = pill_height(0, cell);
+    let long = ((pill_length(work, k, cell, n, edge, signs) + 2.0 * ROOM) * k).round() as i32;
     if edge == Edge::Top {
-        let room = (ww as f64 / k - 2.0 * ROOM - MARGIN).max(least);
-        let width = ((full.min(room) + 2.0 * ROOM) * k).round() as i32;
         let height = ((WIDTH + CARD_ROOM_TOP) * k).round() as i32;
         let x = wx + (ww as f64 * along - ROOM * k).round() as i32;
-        return (x.min(wx + ww - width).max(wx), wy, width, height);
+        return (x.min(wx + ww - long).max(wx), wy, long, height);
     }
-    let room = (wh as f64 / k - 2.0 * ROOM - MARGIN).max(least);
     let width = ((WIDTH + CARD_ROOM) * k).round() as i32;
-    let height = ((full.min(room) + 2.0 * ROOM) * k).round() as i32;
     let x = if edge == Edge::Left { wx } else { wx + ww - width };
     let y = wy + (wh as f64 * along - ROOM * k).round() as i32;
-    (x, y.min(wy + wh - height).max(wy), width, height)
+    (x, y.min(wy + wh - long).max(wy), width, long)
+}
+
+/// The window of a capsule at rest, with the plus in its foot: what the tests measure.
+#[cfg(test)]
+pub fn window_rect(work: (i32, i32, i32, i32), k: f64, along: f64, cell: f64, n: usize, edge: Edge) -> (i32, i32, i32, i32) {
+    window_rect_with(work, k, along, cell, n, edge, false)
+}
+
+/// The window of a folded capsule, as a rectangle on the screen: the short pill with its one key
+/// and the room for its shadow, and nothing else. `at` is where that pill starts along the edge, as a share of the work area, like
+/// `along` for the open capsule. It never leaves the work area.
+pub fn folded_window(work: (i32, i32, i32, i32), k: f64, at: f64, edge: Edge) -> (i32, i32, i32, i32) {
+    let (wx, wy, ww, wh) = work;
+    let at = if at.is_finite() { at.clamp(0.0, 1.0) } else { 0.0 };
+    let (thick, long) = ((WIDTH * k).round() as i32, ((FOLDED + 2.0 * ROOM) * k).round() as i32);
+    if edge == Edge::Top {
+        let start = wx + (ww as f64 * at - ROOM * k).round() as i32;
+        return (start.min(wx + ww - long).max(wx), wy, long.min(ww), thick.min(wh));
+    }
+    let x = if edge == Edge::Left { wx } else { wx + ww - thick.min(ww) };
+    let start = wy + (wh as f64 * at - ROOM * k).round() as i32;
+    (x, start.min(wy + wh - long).max(wy), thick.min(ww), long.min(wh))
+}
+
+/// What shows and takes presses of a folded capsule's window of `size`, `(x, y, width, height)`
+/// inside the window: the pill itself. The room around it is cut away, shadow and all, so a
+/// press beside the key goes to whatever is under it.
+pub fn folded_region(size: (i32, i32), k: f64, edge: Edge) -> (i32, i32, i32, i32) {
+    pill_on_screen((0, 0, size.0, size.1), k, edge)
+}
+
+/// Where the handle window lies while the capsule is folded: over the folded pill, all of it and
+/// no more. Windows carries the folded key by it, the way it carries the capsule by its handle.
+pub fn folded_grip(work: (i32, i32, i32, i32), k: f64, at: f64, edge: Edge) -> (i32, i32, i32, i32) {
+    pill_on_screen(folded_window(work, k, at, edge), k, edge)
+}
+
+/// A press on the handle window moved it at most this far, in CSS px: a touch, not a carry.
+pub const TAP_SLACK: f64 = 8.0;
+
+/// Was a press on the handle window a touch? `carried` says that Windows began to carry the
+/// window, `moved` is the farthest it got from where it stood, in physical px. A window carried
+/// away and brought back was carried all the same.
+pub fn is_tap(carried: bool, moved: i32, k: f64) -> bool {
+    !carried || moved <= (TAP_SLACK * k).round() as i32
+}
+
+/// Where an open capsule whose window, with the two signs showing, is at `window` folds to: the
+/// cut-out whose key has its middle where the fold sign is, the last sign of the foot. It may
+/// reach past the work area; `along_from` makes the share of it and `folded_window` keeps it inside.
+pub fn fold_spot(window: (i32, i32, i32, i32), k: f64, edge: Edge) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = window;
+    let (thick, long) = ((WIDTH * k).round() as i32, ((FOLDED + 2.0 * ROOM) * k).round() as i32);
+    // From the end of the window back to the sign's middle, and half the cut-out further
+    let back = ((ROOM + END + ADD / 2.0) * k).round() as i32 + long / 2;
+    match edge {
+        Edge::Right => (x + w - thick, y + h - back, thick, long),
+        Edge::Left => (x, y + h - back, thick, long),
+        Edge::Top => (x + w - back, y, long, thick),
+    }
 }
 
 /// The part of a window of `size` the capsule itself occupies, `(x, y, width, height)` inside
@@ -227,6 +299,127 @@ mod tests {
                 assert!(x >= 0 && y >= 0 && x + w <= 2880 && y + h <= 1824, "{edge:?} {along}: {x},{y} {w}x{h}");
             }
         }
+    }
+
+    #[test]
+    fn the_open_foot_lengthens_the_capsule_and_the_folded_key_stays_in_the_work_area() {
+        let inside = |(x, y, w, h): (i32, i32, i32, i32), (wx, wy, ww, wh): (i32, i32, i32, i32)| x >= wx && y >= wy && x + w <= wx + ww && y + h <= wy + wh;
+        // A tablet at 200 %, lying and standing, with a taskbar; the three sizes of the panel
+        let works = [(0, 0, 2880, 1824), (0, 40, 1920, 2744)];
+        for scale in [0.8, 1.0, 1.25] {
+            let k = 2.0 * scale;
+            for edge in [Edge::Right, Edge::Left, Edge::Top] {
+                // (start, end) of a rectangle along the edge
+                let span = |r: (i32, i32, i32, i32)| if edge == Edge::Top { (r.0, r.0 + r.2) } else { (r.1, r.1 + r.3) };
+                for (work, cell) in [(works[0], CELL), (works[1], CELL), (works[0], CELL * TABLET_STEP)] {
+                    for along in [0.0, 0.3, 0.62, 0.97, 1.0] {
+                        let what = format!("{edge:?} scale {scale} along {along} {work:?} cell {cell}");
+                        let work_end = span(work).1;
+                        // The two signs: the capsule is one sign longer, whole, and where it was
+                        // unless the end of the work area is in the way; there it is pulled back
+                        // along the edge, not cut short
+                        let rest = window_rect(work, k, along, cell, 6, edge);
+                        let open = window_rect_with(work, k, along, cell, 6, edge, true);
+                        assert!(inside(open, work), "{what}: {open:?}");
+                        let longer = (span(open).1 - span(open).0) - (span(rest).1 - span(rest).0);
+                        assert!((longer - (ADD * k).round() as i32).abs() <= 1, "{what}: longer by {longer}");
+                        assert!(span(open).0 == span(rest).0 || span(open).1 == work_end, "{what}: {rest:?} -> {open:?}");
+                        // Folded: the key's middle is where the fold sign was, at the same edge
+                        let at = along_from(work, k, fold_spot(open, k, edge), edge);
+                        let cut = folded_window(work, k, at, edge);
+                        assert!(inside(cut, work), "{what}: {cut:?}");
+                        match edge {
+                            Edge::Right => assert_eq!(cut.0 + cut.2, work.0 + work.2, "{what}"),
+                            Edge::Left => assert_eq!(cut.0, work.0, "{what}"),
+                            Edge::Top => assert_eq!(cut.1, work.1, "{what}"),
+                        }
+                        let sign = span(open).1 - ((ROOM + END + ADD / 2.0) * k).round() as i32;
+                        let middle = (span(cut).0 + span(cut).1) / 2;
+                        assert!((middle - sign).abs() <= 2 || span(cut).1 == work_end, "{what}: key at {middle}, sign at {sign}");
+                        // A carry saves the place the same way, and it reads back to the same place
+                        assert_eq!(folded_window(work, k, along_from(work, k, cut, edge), edge), cut, "{what}");
+                        // The screen is turned: the same share of the other work area, inside it
+                        for turned in works {
+                            assert!(inside(folded_window(turned, k, at, edge), turned), "{what} turned to {turned:?}");
+                        }
+                    }
+                }
+                for odd in [-1.0, 9.0, f64::NAN] {
+                    assert!(inside(folded_window(works[0], k, odd, edge), works[0]), "{edge:?} {odd}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_window_is_as_long_as_the_pill_the_page_draws_and_the_signs_move_nothing_before_them() {
+        // A tablet at 200 %, lying and standing, and a screen too short for the whole capsule
+        let works = [(0, 0, 2880, 1824), (0, 40, 1920, 2744), (0, 0, 640, 560)];
+        for (work, k) in [(works[0], 2.0), (works[1], 2.5), (works[0], 1.6), (works[2], 2.0)] {
+            for edge in [Edge::Right, Edge::Left, Edge::Top] {
+                let span = |r: (i32, i32, i32, i32)| if edge == Edge::Top { (r.0, r.2) } else { (r.1, r.3) };
+                for (cell, n) in [(CELL, 3), (CELL, 8), (CELL * TABLET_STEP, 8)] {
+                    let rest = pill_length(work, k, cell, n, edge, false);
+                    let open = pill_length(work, k, cell, n, edge, true);
+                    // One sign longer, unless the work area has no room for it
+                    let fits = pill_height(n, cell) + ADD <= span(work).1 as f64 / k - 2.0 * ROOM - MARGIN;
+                    assert!((open - rest - ADD).abs() < 1e-9 || !fits, "{edge:?} {work:?} {k}: {rest} -> {open}");
+                    for along in [0.0, 0.3, 0.62, 0.97] {
+                        let what = format!("{edge:?} {work:?} k {k} along {along} cell {cell} n {n}");
+                        let at_rest = window_rect_with(work, k, along, cell, n, edge, false);
+                        let with_signs = window_rect_with(work, k, along, cell, n, edge, true);
+                        // The window is the pill the page draws and the room before and after it
+                        assert_eq!(span(at_rest).1, ((rest + 2.0 * ROOM) * k).round() as i32, "{what}");
+                        assert_eq!(span(with_signs).1, ((open + 2.0 * ROOM) * k).round() as i32, "{what}");
+                        // The pill starts where the window does: with the signs it starts where it
+                        // did, or the window is pulled back whole from the end of the work area
+                        let end = span(work).0 + span(work).1;
+                        assert!(span(with_signs).0 == span(at_rest).0 || span(with_signs).0 + span(with_signs).1 == end, "{what}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_handle_window_lies_over_the_folded_key_and_a_touch_is_told_from_a_carry() {
+        // A tablet at 200 % with a taskbar on top, the three sizes of the panel
+        let work = (0, 40, 2880, 1784);
+        for scale in [0.8, 1.0, 1.25] {
+            let k = 2.0 * scale;
+            let (side, room) = ((PILL * k).round() as i32, (ROOM * k).round() as i32);
+            for edge in [Edge::Right, Edge::Left, Edge::Top] {
+                // The start of the edge, the middle, and past the end of the work area
+                for at in [0.0, 0.5, 1.0] {
+                    let what = format!("{edge:?} scale {scale} at {at}");
+                    let (wx, wy, ww, wh) = folded_window(work, k, at, edge);
+                    let (x, y, w, h) = folded_grip(work, k, at, edge);
+                    // The whole pill, which is as long as it is thick, flush with the edge
+                    assert_eq!((w, h), (side, side), "{what}");
+                    assert!(x >= wx && y >= wy && x + w <= wx + ww && y + h <= wy + wh, "{what}: outside the folded window");
+                    assert!(x >= work.0 && y >= work.1 && x + w <= work.0 + work.2 && y + h <= work.1 + work.3, "{what}: outside the work area");
+                    match edge {
+                        Edge::Right => assert_eq!((x + w, y), (work.0 + work.2, wy + room), "{what}"),
+                        Edge::Left => assert_eq!((x, y), (work.0, wy + room), "{what}"),
+                        Edge::Top => assert_eq!((x, y), (wx + room, work.1), "{what}"),
+                    }
+                    // What is cut out of the folded window is that pill and no more
+                    let (rx, ry, rw, rh) = folded_region((ww, wh), k, edge);
+                    assert_eq!((wx + rx, wy + ry, rw, rh), (x, y, w, h), "{what}");
+                    // Carried to another edge and let go there, it is over the key again
+                    let along = along_from(work, k, (wx, wy, ww, wh), edge);
+                    assert_eq!(folded_grip(work, k, along, edge), (x, y, w, h), "{what}");
+                }
+            }
+        }
+        // A press Windows never began to carry is a touch; so is one it carried no further than
+        // the slack. Carried away and back, the farthest point counts, so that is a carry
+        assert!(is_tap(false, 0, 2.0));
+        assert!(is_tap(false, 500, 2.0));
+        assert!(is_tap(true, 0, 2.0));
+        assert!(is_tap(true, 16, 2.0));
+        assert!(!is_tap(true, 17, 2.0));
+        assert!(is_tap(true, 8, 1.0) && !is_tap(true, 9, 1.0));
     }
 
     #[test]
