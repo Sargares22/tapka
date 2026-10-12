@@ -7,9 +7,9 @@ cd "$(dirname "$0")/.."
 cargo test
 node --test scripts/check-page.mjs
 
-# Every file AGENTS.md names is there
-for path in $(grep -o '`[A-Za-z0-9_./-]*\.[a-z]*`' AGENTS.md | tr -d '`' | sort -u); do
-  [ -e "$path" ] || { echo "AGENTS.md names $path, which does not exist"; exit 1; }
+# Every file the notes for agents name is there
+for path in $(grep -oh '`[A-Za-z0-9_./-]*\.[a-z]*`' AGENTS.md docs/*.md | tr -d '`' | sort -u); do
+  [ -e "$path" ] || { echo "the notes for agents name $path, which does not exist"; exit 1; }
 done
 # Every skill has its pointer for Claude Code, and the pointer names the skill
 for skill in .agents/skills/*/; do
@@ -17,4 +17,5 @@ for skill in .agents/skills/*/; do
   grep -q ".agents/skills/$name/SKILL.md" ".claude/skills/$name/SKILL.md" 2>/dev/null \
     || { echo "no pointer to the skill $name in .claude/skills"; exit 1; }
 done
+sh scripts/checklist.sh
 echo "all checks passed"
