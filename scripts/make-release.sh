@@ -25,4 +25,6 @@ cat > dist/latest.json <<EOF
   }
 }
 EOF
+# Checksums, so a person or an agent can check a downloaded installer
+(cd dist && sha256sum Tapka_*-setup.exe > SHA256SUMS.txt)
 ls -la dist

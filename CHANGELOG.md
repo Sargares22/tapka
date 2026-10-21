@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4.0 (2026-10-21)
+
+- Meters: a block of small gauges under the keys, rounded squares of the keys' look whose outline fills from the middle of the top, behind a thin line you drag to share the capsule between keys and gauges. A gauge follows a program you pick from the installed ones (the progress Windows shows on its taskbar button, a progress bar in its windows, or a percent at the start of its title) or a number in a text file. A tap on a gauge works like a key of its program: it opens the program, brings it forward, or folds it away when it is in front.
+- A key of a program that has a gauge shows the same progress as a ring along its edge. With no gauge set up at all, a key's edge fills the same way while its program shows progress on its taskbar button, a copy in File Explorer say, and clears when it ends.
+- A gauge's text file can hold a second number, drawn as a thin second outline just outside the gauge, and up to five lines of text that show in the gauge's label; the format is in the README.
+- A gauge tells fresh numbers from old ones. A file may say when its numbers were last read (`updated:`) and how many minutes they stay fresh (`fresh:`, 5 by default); without `updated:` the time the file was written counts. Older numbers turn the gauge grey with its last percent, and its label says *updated 12 min ago*. A file that is missing or holds no number shows a grey gauge with *—* and *no data*, never 0 %.
+- A file may say when its numbers reset (`reset:`, and `reset2:` for the second outline). The label counts down, *resets in 2 h 33 min*, or names the day when it is more than a day off, *resets Mon 26 Oct, 11:00*, every minute without the file changing; once the time has passed it says *due, waiting for an update*.
+- The gauges all show when the capsule has room for them, and the keys take the rest. Dragging the line up makes the gauges grow until all of them show, then the capsule gets shorter; dragging it down gives the keys more room and the gauges scroll.
+- When a program of a key or a gauge updates into a newer version folder beside the old one, Tapka finds it and puts the new path in the settings; Items in the settings window says "Path updated". When it finds the program nowhere, in several places, or only in some other folder, the key turns grey and says "Program not found — tap to choose"; a tap opens its card in the settings window, which offers a program of that file found elsewhere with a "Use it" button. A program on a drive that is not plugged in is left as it is.
+- A first start sets up four keys that all show without scrolling: Undo, Snip, the on-screen keyboard and File Explorer. With a keyboard attached, Redo takes the on-screen keyboard's place; on a screen that takes a pen, Hold Shift takes File Explorer's. A settings file you already have stays as it is.
+- A first start no longer opens the settings window. A small window beside the capsule offers up to eight of your programs with their icons, those pinned to the taskbar first, then those with open windows, all ticked. *Add* makes keys of the ticked ones, and the capsule scrolls to them and says *Tap a key* until you tap one. *Not now*, or a tap anywhere else, closes the window for good.
+- *Find my programs* under the list of keys in the settings window opens the same card at any time.
+- The capsule's length is yours: tap *+* and drag the short bar at the far end of the capsule to make it longer or shorter, one key at a time. The length is kept in the settings as the most the capsule may take: it is never longer than its keys and gauges need, so it shows no empty cells, and it grows back when a program brings more keys. Until you drag, the capsule shows up to four keys and all its gauges.
+- The gear, the arrow and the bar after a tap on *+* stay while the mouse is over the capsule, and go a few seconds after it leaves.
+- A right click in Tapka's windows no longer opens the browser's menu (text fields keep theirs), and F5, Ctrl+R or Ctrl+P no longer reload or print them.
+- README: a phrase that hands the setup to a coding agent, which installs Tapka with you and adds your programs as keys and gauges.
+
 ## 1.3.0 (2026-10-11)
 
 - The capsule folds away: a tap on *+* puts two signs in its place for a few seconds, a gear that opens the settings window and an arrow that folds the capsule into one key at the edge. A tap on that key brings the capsule back; drag it, and it goes to the left, right or top edge, like the capsule by its handle. Folded stays folded after a restart.

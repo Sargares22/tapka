@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Capsule and settings windows: core APIs, and the file picker for the settings window",
-  "windows": ["capsule", "settings"],
+  "description": "Capsule, settings and welcome windows: core APIs, and the file picker for the settings window",
+  "windows": ["capsule", "settings", "welcome"],
   "permissions": ["core:default", "dialog:allow-open"]
 }

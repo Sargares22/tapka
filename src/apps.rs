@@ -5,7 +5,7 @@
 use windows::core::{GUID, HSTRING, PWSTR};
 use windows::Win32::Foundation::PROPERTYKEY;
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
+    CoCreateInstance, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
 };
 use windows::Win32::UI::Shell::{
     IEnumShellItems, IShellItem, IShellItem2, IShellLinkW, ILFree, SHCreateItemFromIDList, SHCreateItemFromParsingName, ShellLink, BHID_EnumItems,
@@ -13,12 +13,26 @@ use windows::Win32::UI::Shell::{
 };
 use windows::core::Interface;
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct App {
     pub name: String,
     /// What an `open` item is given to start it: the path of its exe where there is one and it
     /// takes no arguments, otherwise its `shell:AppsFolder\…` address.
     pub target: String,
+    /// For a program opened by its exe: the id it gives its windows, when it gives one of its own.
+    /// Its taskbar button shows that id instead of the exe, which is what a meter of it looks for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    /// What its shortcut passes to the program it starts: tells an uninstaller or an updater apart.
+    #[serde(skip)]
+    pub args: String,
+}
+
+/// An app's id as the shell names it, when it is one: an id that is a path is the exe's own, not
+/// one the program gave itself.
+fn own_app_id(id: &str) -> Option<String> {
+    let id = id.trim();
+    (!id.is_empty() && !id.contains(['\\', '/'])).then(|| id.to_string())
 }
 
 /// System.Link.TargetParsingPath: the file a Start menu entry starts.
@@ -37,8 +51,8 @@ unsafe fn owned(text: PWSTR) -> String {
 pub fn installed() -> Vec<App> {
     let mut found = Vec::new();
     unsafe {
-        // The shell needs COM on this thread; a thread that already has it answers with an error
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // The shell needs COM on this thread, until its objects here are gone
+        let _com = crate::win::Com::new(COINIT_APARTMENTTHREADED);
         let Ok(folder) = SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from("shell:AppsFolder"), None) else { return found };
         let Ok(items) = folder.BindToHandler::<_, IEnumShellItems>(None, &BHID_EnumItems) else { return found };
         loop {
@@ -55,12 +69,14 @@ pub fn installed() -> Vec<App> {
             }
             // A plain desktop program is opened by its exe, so the panel can tell when it runs.
             // One started with arguments (a site installed as an app, say) keeps its address.
-            let exe = item.cast::<IShellItem2>().ok().and_then(|props| {
+            let props = item.cast::<IShellItem2>().ok();
+            let args = props.as_ref().and_then(|p| p.GetString(&LINK_ARGUMENTS).ok()).map(|a| owned(a)).unwrap_or_default();
+            let exe = props.and_then(|props| {
                 let path = props.GetString(&LINK_TARGET).ok().map(|p| owned(p))?;
-                let plain = props.GetString(&LINK_ARGUMENTS).ok().map(|a| owned(a)).is_none_or(|a| a.trim().is_empty());
-                (plain && path.to_lowercase().ends_with(".exe") && std::path::Path::new(&path).is_file()).then_some(path)
+                (args.trim().is_empty() && path.to_lowercase().ends_with(".exe") && std::path::Path::new(&path).is_file()).then_some(path)
             });
-            found.push(App { name, target: exe.unwrap_or_else(|| format!("shell:AppsFolder\\{id}")) });
+            let app = exe.as_ref().and_then(|_| own_app_id(&id));
+            found.push(App { name, target: exe.unwrap_or_else(|| format!("shell:AppsFolder\\{id}")), app, args });
         }
     }
     found.sort_by_key(|a| a.name.to_lowercase());
@@ -108,8 +124,8 @@ pub fn found(target: &str) -> bool {
     let target = target.trim();
     let lower = target.to_lowercase();
     if lower.starts_with("shell:appsfolder\\") {
-        // The shell needs COM on this thread; a thread that already has it answers with an error
-        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        // The shell needs COM on this thread
+        let _com = crate::win::Com::new(COINIT_APARTMENTTHREADED);
         return opens(target);
     }
     let on_drive = matches!(lower.as_bytes(), [drive, b':', b'\\' | b'/', ..] if drive.is_ascii_lowercase());
@@ -120,12 +136,16 @@ pub fn found(target: &str) -> bool {
 /// whose target cannot be told is left out.
 pub fn pinned() -> Vec<App> {
     let Ok(appdata) = std::env::var("APPDATA") else { return Vec::new() };
-    let folder = std::path::Path::new(&appdata).join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar");
+    shortcuts_in(&std::path::Path::new(&appdata).join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"))
+}
+
+/// The shortcuts in a folder, by name, as `pinned` lists them.
+fn shortcuts_in(folder: &std::path::Path) -> Vec<App> {
     let Ok(files) = std::fs::read_dir(folder) else { return Vec::new() };
     let mut found = Vec::new();
     unsafe {
-        // The shell needs COM on this thread; a thread that already has it answers with an error
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // The shell needs COM on this thread, until its objects here are gone
+        let _com = crate::win::Com::new(COINIT_APARTMENTTHREADED);
         for file in files.flatten().map(|f| f.path()) {
             if !file.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk")) {
                 continue;
@@ -151,12 +171,81 @@ pub fn pinned() -> Vec<App> {
             // The name Explorer shows for the shortcut, in the language of Windows
             let name = shortcut.GetDisplayName(SIGDN_NORMALDISPLAY).ok().map(|n| owned(n)).filter(|n| !n.trim().is_empty());
             let name = name.unwrap_or_else(|| file.file_stem().unwrap_or_default().to_string_lossy().into_owned());
-            found.push(App { name, target });
+            let app = if target.starts_with("shell:") { None } else { app_id.as_deref().and_then(own_app_id) };
+            found.push(App { name, target, app, args });
         }
     }
     found.sort_by_key(|a| a.name.to_lowercase());
     found.dedup_by(|a, b| a.target == b.target);
     found
+}
+
+/// The card of programs, in the welcome window and from the Items page, offers this many at most.
+pub const FIRST_CARD: usize = 8;
+
+/// Whether a target is one of Windows' own programs the panel has a ready action for: File Explorer
+/// and Settings. The card of programs does not offer them as programs.
+fn has_default_key(target: &str) -> bool {
+    let target = target.trim().to_lowercase();
+    let file = target.rsplit(['\\', '/']).next().unwrap_or("");
+    let app = target.strip_prefix("shell:appsfolder\\").unwrap_or("");
+    matches!(file, "explorer.exe" | "systemsettings.exe") || app == "microsoft.windows.explorer" || app.starts_with("windows.immersivecontrolpanel_")
+}
+
+/// Whether a shortcut starts a program's service rather than the program: an uninstaller, an
+/// updater, a setup, a helper, a crash reporter, or the Store itself. Told by the file name of the
+/// exe it starts and by the arguments it passes, never by the name of a product.
+fn service(app: &App) -> bool {
+    let target = app.target.trim().to_lowercase();
+    let store = target.strip_prefix("shell:appsfolder\\").is_some_and(|id| id.starts_with("microsoft.windowsstore_"));
+    let file = target.rsplit(['\\', '/']).next().unwrap_or("");
+    let exe = file.strip_suffix(".exe").filter(|_| file.ends_with(".exe"));
+    let by_name = exe.is_some_and(|stem| {
+        stem.starts_with("unins") || stem.starts_with("setup") || ["uninstall", "update", "helper", "crash"].iter().any(|word| stem.contains(word))
+    });
+    let args = app.args.to_lowercase();
+    let by_args = args.split(|c: char| c.is_whitespace() || c == '=').any(|arg| {
+        let arg = arg.trim_start_matches(['-', '/']);
+        arg == "uninstall" || arg == "update" || arg == "x"
+    });
+    store || by_name || by_args
+}
+
+/// The programs of the windows open now, as the Start menu lists them, front to back and each once:
+/// `windows` gives each window's program by the full path of its exe and the id of the app it stands
+/// for. Matched as a meter matches a window (`meters::window_of`): an exe by its full path or the id
+/// it gives its windows, an app by its whole id.
+pub fn of_windows(installed: &[App], windows: &[(String, Option<String>)]) -> Vec<App> {
+    let mut found: Vec<App> = Vec::new();
+    for (path, id) in windows {
+        let app = installed.iter().find(|a| crate::meters::window_of(&a.target, a.app.as_deref(), path, id.as_deref()));
+        if let Some(app) = app.filter(|a| !found.iter().any(|f| f.target == a.target)) {
+            found.push(app.clone());
+        }
+    }
+    found
+}
+
+/// What the card of programs offers: the programs pinned to the taskbar, then those with windows
+/// open now, `FIRST_CARD` at most, each once. Left out: the panel itself (`own`, the file name of
+/// its exe), Windows' own programs that have a ready action, services (`service`), and the
+/// programs `items` (the targets of the items) already open, told apart as the meters tell programs
+/// apart.
+pub fn first_card(pinned: Vec<App>, running: Vec<App>, items: &[String], own: &str) -> Vec<App> {
+    let own = own.to_lowercase();
+    let mut chosen: Vec<App> = Vec::new();
+    for app in pinned.into_iter().chain(running) {
+        if chosen.len() == FIRST_CARD {
+            break;
+        }
+        let same = |target: &str| crate::meters::same_program(&app.target, target);
+        let file = app.target.trim().rsplit(['\\', '/']).next().unwrap_or("").to_lowercase();
+        if file == own || has_default_key(&app.target) || service(&app) || items.iter().any(|t| same(t)) || chosen.iter().any(|c| same(&c.target)) {
+            continue;
+        }
+        chosen.push(app);
+    }
+    chosen
 }
 
 /// What a person calls a program with windows: its name in the Start menu, found by its file
@@ -174,10 +263,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_an_id_a_program_gave_itself_is_kept_for_its_meter() {
+        assert_eq!(own_app_id(" Vendor.Render "), Some("Vendor.Render".into()));
+        assert_eq!(own_app_id("{6D809377-6AF0-444B-8957-A3773F02200E}\\Tool\\tool.exe"), None);
+        assert_eq!(own_app_id("C:/Tools/tool.exe"), None);
+        assert_eq!(own_app_id(""), None);
+    }
+
+    #[test]
     fn a_program_is_called_by_its_start_menu_name() {
         let apps = [
-            App { name: "Paint Studio".into(), target: r"C:\Tools\Paint.exe".into() },
-            App { name: "Notes".into(), target: r"shell:AppsFolder\Vendor.Notes_abc123xyz!App".into() },
+            App { name: "Paint Studio".into(), target: r"C:\Tools\Paint.exe".into(), ..App::default() },
+            App { name: "Notes".into(), target: r"shell:AppsFolder\Vendor.Notes_abc123xyz!App".into(), ..App::default() },
         ];
         assert_eq!(name_of(&apps, "paint.exe", None), "Paint Studio");
         assert_eq!(name_of(&apps, "notes.exe", Some("Vendor.Notes_abc123xyz")), "Notes");
@@ -185,6 +282,84 @@ mod tests {
         // Not in the Start menu: the file name without its extension
         assert_eq!(name_of(&apps, "sketch.exe", None), "sketch");
         assert_eq!(name_of(&apps, "", Some("vendor.other_abc")), "vendor.other_abc");
+    }
+
+    #[test]
+    fn the_first_card_offers_pinned_then_open_programs_without_the_ones_already_there() {
+        let app = |name: &str, target: &str| App { name: name.into(), target: target.into(), ..App::default() };
+        let pinned = vec![
+            app("Files", r"shell:AppsFolder\Microsoft.Windows.Explorer"),
+            app("Paint", r"C:\Tools\Paint.exe"),
+            app("Tapka", r"C:\Program Files\Tapka\tapka.exe"),
+            app("Notes", r"shell:AppsFolder\Vendor.Notes_abc!App"),
+            app("Old", r"C:\Old\old.exe"),
+        ];
+        let running = vec![
+            app("Settings", r"shell:AppsFolder\windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel"),
+            app("Paint again", r"c:/tools/paint.EXE"),
+            app("Render", r"D:\Render\render.exe"),
+            app("Explorer", r"C:\Windows\explorer.exe"),
+            app("Paint elsewhere", r"D:\Other\paint.exe"),
+        ];
+        // An item already opens Old, written another way
+        let items = vec![r"c:\old\OLD.exe".to_string(), "ms-settings:".to_string()];
+        let names = |found: Vec<App>| found.into_iter().map(|a| a.name).collect::<Vec<_>>();
+        assert_eq!(names(first_card(pinned, running, &items, "tapka.exe")), ["Paint", "Notes", "Render", "Paint elsewhere"]);
+        // No more than eight, pinned first
+        let many: Vec<App> = (0..12).map(|i| app(&format!("P{i}"), &format!(r"C:\P{i}\p{i}.exe"))).collect();
+        assert_eq!(names(first_card(many[..6].to_vec(), many[6..].to_vec(), &[], "tapka.exe")), ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"]);
+        // Nothing found, nothing offered
+        assert!(first_card(Vec::new(), Vec::new(), &items, "tapka.exe").is_empty());
+    }
+
+    #[test]
+    fn the_first_card_leaves_out_uninstallers_updaters_helpers_and_the_store_before_it_counts_eight() {
+        let app = |name: &str, target: &str, args: &str| App { name: name.into(), target: target.into(), args: args.into(), ..App::default() };
+        let services = vec![
+            app("Uninstall", r"C:\Tools\unins000.exe", ""),
+            app("Remove", r"C:\Tools\Uninstall Tool.exe", ""),
+            app("Update", r"C:\Users\Public\Tool\Update.exe", ""),
+            app("Updater", r"C:\Tools\ToolUpdater.exe", ""),
+            app("Helper", r"C:\Tools\tool_helper.exe", ""),
+            app("Crash", r"C:\Tools\crashpad_handler.exe", ""),
+            app("Reporter", r"C:\Tools\CrashHandler.exe", ""),
+            app("Setup", r"C:\Tools\setup64.exe", ""),
+            app("Remove by argument", r"shell:AppsFolder\Vendor.Tool", "--uninstall"),
+            app("Update by argument", r"shell:AppsFolder\Vendor.Other", "/update now"),
+            app("Installer", r"shell:AppsFolder\Vendor.Msi", "/x {0000}"),
+            app("Store", r"shell:AppsFolder\Microsoft.WindowsStore_8wekyb3d8bbwe!App", ""),
+        ];
+        assert!(services.iter().all(service), "{:?}", services.iter().filter(|a| !service(a)).collect::<Vec<_>>());
+        // A program started through an updater with an argument of its own, and plain programs
+        assert!(!service(&app("Chat", r"shell:AppsFolder\Vendor.Chat", "--processStart chat.exe")));
+        assert!(!service(&app("Paint", r"C:\Tools\paint.exe", "")));
+        assert!(!service(&app("Notes", r"shell:AppsFolder\Vendor.Notes_abc!App", "")));
+        // The services do not take places among the eight
+        let many: Vec<App> = (0..9).map(|i| app(&format!("P{i}"), &format!(r"C:\P{i}\p{i}.exe"), "")).collect();
+        let found = first_card(services.into_iter().chain(many[..4].to_vec()).collect(), many[4..].to_vec(), &[], "tapka.exe");
+        assert_eq!(found.into_iter().map(|a| a.name).collect::<Vec<_>>(), ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"]);
+    }
+
+    #[test]
+    fn an_open_window_is_its_program_by_full_path_or_whole_app_id() {
+        let app = |name: &str, target: &str, id: Option<&str>| App { name: name.into(), target: target.into(), app: id.map(Into::into), ..App::default() };
+        let installed = [
+            app("Old Paint", r"D:\Old\paint.exe", None),
+            app("Paint", r"C:\Tools\paint.exe", None),
+            app("Player", r"shell:AppsFolder\Vendor.Media_abc!Player", None),
+            app("Editor", r"shell:AppsFolder\Vendor.Media_abc!Editor", None),
+            app("Render", r"C:\Render\render.exe", Some("Vendor.Render")),
+        ];
+        let window = |path: &str, id: Option<&str>| (path.to_string(), id.map(Into::into));
+        let windows = [
+            window(r"c:\tools\PAINT.exe", None),
+            window(r"C:\Program Files\WindowsApps\media.exe", Some("vendor.media_abc!editor")),
+            window(r"C:\Tools\paint.exe", None),
+            window(r"C:\Render\render-gpu.exe", Some("Vendor.Render")),
+            window(r"E:\Elsewhere\paint.exe", None),
+        ];
+        let names: Vec<String> = of_windows(&installed, &windows).into_iter().map(|a| a.name).collect();
+        assert_eq!(names, ["Paint", "Editor", "Render"]);
     }
 
     #[test]
@@ -213,7 +388,7 @@ mod tests {
         assert!(opens(&format!("{windir}\\explorer.exe")));
         assert!(!opens(r"C:\no\such\paint.exe"));
         // An app of Windows itself, and an id no app has; the shell needs COM, as in `pinned`
-        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        let _com = crate::win::Com::new(COINIT_APARTMENTTHREADED);
         assert!(opens(r"shell:AppsFolder\Microsoft.Windows.Explorer"));
         assert!(!opens(r"shell:AppsFolder\Vendor.NoSuchPaint_abc123xyz!App"));
     }
@@ -236,10 +411,30 @@ mod tests {
     }
 
     #[test]
-    fn the_pinned_shortcuts_of_this_machine_can_be_opened() {
-        let pinned = super::pinned();
-        assert!(pinned.iter().all(|a| !a.name.trim().is_empty()));
-        assert!(pinned.iter().all(|a| a.target.starts_with("shell:AppsFolder\\") || a.target.to_lowercase().ends_with(".exe")));
+    fn a_pinned_shortcut_is_listed_by_its_name_with_the_program_it_opens() {
+        let windir = std::env::var("WINDIR").unwrap();
+        let explorer = format!("{windir}\\explorer.exe");
+        let folder = std::env::temp_dir().join(format!("tapka-pinned-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        // A shortcut to a program, one to a program that is gone, and a file that is no shortcut
+        let make = |name: &str, target: &str| unsafe {
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).unwrap();
+            link.SetPath(&HSTRING::from(target)).unwrap();
+            link.cast::<IPersistFile>().unwrap().Save(&HSTRING::from(folder.join(name).as_os_str()), true).unwrap();
+        };
+        {
+            let _com = crate::win::Com::new(COINIT_APARTMENTTHREADED);
+            make("Files.lnk", &explorer);
+            make("Gone.lnk", r"C:\no\such\paint.exe");
+        }
+        std::fs::write(folder.join("notes.txt"), "not a shortcut").unwrap();
+        let found = shortcuts_in(&folder);
+        let _ = std::fs::remove_dir_all(&folder);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].name, "Files");
+        assert!(found[0].target.eq_ignore_ascii_case(&explorer), "{:?}", found[0]);
+        assert_eq!(found[0].app, None);
     }
 
     #[test]

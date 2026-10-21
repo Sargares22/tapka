@@ -1,26 +1,30 @@
 //! The Windows calls behind the steps in `actions`.
 
-use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
+use windows::core::{BOOL, GUID, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY,
     KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, VIRTUAL_KEY,
 };
-use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass, ShellExecuteW};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WAIT_TIMEOUT, WPARAM};
+use windows::Win32::UI::Shell::{DefSubclassProc, SHGetKnownFolderPath, SetWindowSubclass, ShellExecuteW, KF_FLAG_DEFAULT};
+use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
+use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, POINT, PROPERTYKEY, RECT, WAIT_TIMEOUT, WPARAM};
 use windows::Win32::Globalization::GetUserDefaultUILanguage;
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
-use windows::Win32::Storage::Packaging::Appx::GetPackageFamilyName;
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
+use windows::Win32::Storage::Packaging::Appx::{GetApplicationUserModelId, GetPackageFamilyName};
 use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::Threading::{
-    AttachThreadInput, GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, WaitForSingleObject, PROCESS_NAME_WIN32,
+    AttachThreadInput, GetCurrentProcess, GetCurrentProcessId, GetProcessTimes, GetCurrentThreadId, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, WaitForSingleObject, PROCESS_NAME_WIN32,
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
 };
-use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_OR};
+use windows::Win32::Graphics::Gdi::{
+    CombineRgn, CreateRectRgn, DeleteObject, GetMonitorInfoW, GetWindowRgn, GDI_REGION_TYPE, MonitorFromWindow, SetWindowRgn, MONITORINFO, MONITOR_DEFAULTTONEAREST, RGN_OR,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, InternalGetWindowText, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
     GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindowAsync,
-    GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, WS_EX_APPWINDOW, GW_OWNER, WM_NCACTIVATE, WM_NCPAINT, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_MINIMIZE, SW_RESTORE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    SM_CONVERTIBLESLATEMODE, SW_HIDE, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
+    GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, WS_EX_APPWINDOW, GW_OWNER, WM_NCACTIVATE, WM_NCPAINT, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_MINIMIZE, SW_RESTORE, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    NID_EXTERNAL_PEN, NID_INTEGRATED_PEN, SM_CONVERTIBLESLATEMODE, SM_DIGITIZER, SW_HIDE, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
 };
 
 /// Windows speaks Russian to this user: its display language is Russian.
@@ -97,6 +101,12 @@ pub fn set_visible(hwnd: isize, visible: bool) {
 /// Tablet mode: the keyboard is detached or folded back. Windows reports 0 in slate mode.
 pub fn tablet_mode() -> bool {
     unsafe { GetSystemMetrics(SM_CONVERTIBLESLATEMODE) == 0 }
+}
+
+/// The machine takes a pen: its screen has one built in or one is attached.
+pub fn pen_present() -> bool {
+    let digitizer = unsafe { GetSystemMetrics(SM_DIGITIZER) } as u32;
+    digitizer & (NID_INTEGRATED_PEN | NID_EXTERNAL_PEN) != 0
 }
 pub fn is_visible(hwnd: isize) -> bool {
     unsafe { IsWindowVisible(HWND(hwnd as _)).as_bool() }
@@ -281,26 +291,163 @@ fn program_of_process(pid: u32) -> Option<(String, Option<String>)> {
     }
 }
 
+/// The full path of an open process's program file.
+fn path_behind(process: HANDLE) -> Option<String> {
+    let mut path = [0u16; 1024];
+    let mut len = path.len() as u32;
+    unsafe { QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(path.as_mut_ptr()), &mut len).ok()? };
+    Some(String::from_utf16_lossy(&path[..len as usize]))
+}
+
+/// The full paths of the running processes whose program file is named `exe`, in any case. Only
+/// the processes of that name are opened.
+pub fn process_paths(exe: &str) -> Vec<String> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    let exe = exe.to_lowercase();
+    let mut found = Vec::new();
+    unsafe {
+        let Ok(list) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return found };
+        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut more = Process32FirstW(list, &mut entry).is_ok();
+        while more {
+            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+            if String::from_utf16_lossy(&entry.szExeFile[..len]).to_lowercase() == exe {
+                if let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, entry.th32ProcessID) {
+                    found.extend(path_behind(process));
+                    let _ = CloseHandle(process);
+                }
+            }
+            more = Process32NextW(list, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(list);
+    }
+    found
+}
+
 /// The same for a process that is already open.
 fn program_behind(process: HANDLE) -> Option<(String, Option<String>)> {
     unsafe {
-        let mut path = [0u16; 1024];
-        let mut len = path.len() as u32;
-        let named = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(path.as_mut_ptr()), &mut len).is_ok();
+        let path = path_behind(process);
         let mut family = [0u16; 256];
         let mut family_len = family.len() as u32;
         // 0 is ERROR_SUCCESS; an unpackaged program answers APPMODEL_ERROR_NO_PACKAGE
         let packaged = GetPackageFamilyName(process, &mut family_len, Some(PWSTR(family.as_mut_ptr()))).0 == 0;
-        if !named {
-            return None;
-        }
-        let path = String::from_utf16_lossy(&path[..len as usize]);
+        let path = path?;
         let exe = path.rsplit(['\\', '/']).next()?.to_lowercase();
         let family = packaged
             .then(|| String::from_utf16_lossy(&family[..family_len.saturating_sub(1) as usize]))
             .filter(|f| !f.is_empty());
         Some((exe, family))
     }
+}
+
+/// COM on this thread for as long as this lives. Every start that worked, one that found COM
+/// already started included, needs its own end; made before the COM objects of its scope, it ends
+/// COM after they are gone.
+pub struct Com(bool);
+
+impl Com {
+    pub fn new(model: COINIT) -> Com {
+        Com(unsafe { CoInitializeEx(None, model) }.is_ok())
+    }
+}
+
+impl Drop for Com {
+    fn drop(&mut self) {
+        if self.0 {
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
+/// The path of a known folder, named by its id as in `1AC14E77-02E7-4E5D-B744-2EB1AE5198B7`, with
+/// or without braces; `None` for an id this machine does not know.
+pub fn known_folder(id: &str) -> Option<String> {
+    let id = id.trim().trim_start_matches('{').trim_end_matches('}');
+    let guid = GUID::try_from(id).ok()?;
+    unsafe {
+        let path = SHGetKnownFolderPath(&guid, KF_FLAG_DEFAULT, None).ok()?;
+        let text = path.to_string().ok();
+        CoTaskMemFree(Some(path.0 as *const _));
+        text.filter(|t| !t.is_empty())
+    }
+}
+
+/// System.AppUserModel.ID: the id of the app a window stands for, which the taskbar groups it by.
+const APP_ID: PROPERTYKEY = PROPERTYKEY { fmtid: GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3), pid: 5 };
+
+/// The id of the app a window was given, which the taskbar then groups it by; `None` when it was
+/// given none. Needs COM on this thread.
+fn window_app_id(hwnd: HWND) -> Option<String> {
+    unsafe { SHGetPropertyStoreForWindow::<IPropertyStore>(hwnd) }
+        .and_then(|store| unsafe { store.GetValue(&APP_ID) })
+        .ok()
+        .map(|value| value.to_string())
+        .filter(|id| !id.trim().is_empty())
+}
+
+/// The id of the packaged app a process runs; `None` for a plain program.
+fn process_app_id(process: HANDLE) -> Option<String> {
+    let mut id = [0u16; 256];
+    let mut len = id.len() as u32;
+    // 0 is ERROR_SUCCESS; a process of no package answers APPMODEL_ERROR_NO_APPLICATION
+    let found = unsafe { GetApplicationUserModelId(process, &mut len, Some(PWSTR(id.as_mut_ptr()))) }.0 == 0;
+    found.then(|| String::from_utf16_lossy(&id[..len.saturating_sub(1) as usize])).filter(|id| !id.is_empty())
+}
+
+/// A window of a program as the meters look for its progress.
+pub struct ProgramWindow {
+    pub hwnd: isize,
+    /// The full path of the program's file.
+    pub path: String,
+    /// The id of the app the window stands for, when asked for and it has one: the one the window
+    /// was given, or else the one of the packaged app its process runs.
+    pub app: Option<String>,
+}
+
+/// Every visible window of other programs, front to back: dialogs a window owns, tool windows and
+/// windows without a title included, since a program may show its progress only in such a
+/// dialog. Not the list a key goes by (`app_windows`). With `with_app` each window's app id is
+/// read too, which needs COM on this thread.
+pub fn program_windows(with_app: bool) -> Vec<ProgramWindow> {
+    struct Look {
+        with_app: bool,
+        /// What is known of each process seen in this look: its program's path and its app id.
+        processes: Vec<(u32, Option<String>, Option<String>)>,
+        found: Vec<ProgramWindow>,
+    }
+    unsafe extern "system" fn each(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let look = &mut *(lp.0 as *mut Look);
+        // The panel's own windows first, before anything is asked of them (see app_windows)
+        let pid = owner_of(hwnd);
+        if pid == GetCurrentProcessId() || !IsWindowVisible(hwnd).as_bool() {
+            return BOOL(1);
+        }
+        let Some(pid) = shown_by(hwnd, pid) else { return BOOL(1) };
+        let known = match look.processes.iter().position(|p| p.0 == pid) {
+            Some(at) => at,
+            None => {
+                let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok();
+                let path = process.and_then(path_behind);
+                let app = if look.with_app { process.and_then(process_app_id) } else { None };
+                if let Some(process) = process {
+                    let _ = CloseHandle(process);
+                }
+                look.processes.push((pid, path, app));
+                look.processes.len() - 1
+            }
+        };
+        let (_, path, process_app) = &look.processes[known];
+        let Some(path) = path.clone() else { return BOOL(1) };
+        let app = if look.with_app { window_app_id(hwnd).or_else(|| process_app.clone()) } else { None };
+        look.found.push(ProgramWindow { hwnd: hwnd.0 as isize, path, app });
+        BOOL(1)
+    }
+    let mut look = Look { with_app, processes: Vec::new(), found: Vec::new() };
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut look as *mut Look as isize));
+    }
+    look.found
 }
 
 /// What the last look over the desktop learned: which program each window belongs to. The
@@ -493,6 +640,158 @@ pub fn move_window(hwnd: isize, x: i32, y: i32) {
     }
 }
 
+/// One window of one run of a program: a handle Windows may give to another window once this one
+/// is gone, the process that owns it, and when that process started, since its number may be
+/// given to another process too.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowId {
+    pub hwnd: isize,
+    pub pid: u32,
+    pub born: u64,
+}
+
+/// A window of another program that stays above the others, on the screen now.
+#[derive(Debug, PartialEq)]
+pub struct TopWindow {
+    pub id: WindowId,
+    /// The program's file name, lower case.
+    pub exe: String,
+    pub family: Option<String>,
+    /// The full path of the program's file: where its icon is, and what a docked entry goes by.
+    pub path: String,
+    /// The window's class: with the path, what tells the ticked window from the program's others.
+    pub class: String,
+    /// What shows of the window, `(x, y, width, height)` in physical px: its rectangle without
+    /// the invisible borders Windows gives a window that can be resized.
+    pub rect: (i32, i32, i32, i32),
+    /// The window's own corner minus the corner of what shows of it: what a move adds.
+    pub border: (i32, i32),
+    /// Parts of it can be seen through: it is layered, drawn without a redirection bitmap (as a
+    /// transparent web page is) or cut by a window region.
+    pub see_through: bool,
+}
+
+/// What shows of a window and its invisible borders (see `TopWindow`).
+fn frame_of(hwnd: HWND) -> Option<((i32, i32, i32, i32), (i32, i32))> {
+    let (mut outer, mut shows) = (RECT::default(), RECT::default());
+    unsafe {
+        GetWindowRect(hwnd, &mut outer).ok()?;
+        if DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &mut shows as *mut RECT as *mut _, std::mem::size_of::<RECT>() as u32).is_err() {
+            shows = outer;
+        }
+    }
+    Some(((shows.left, shows.top, shows.right - shows.left, shows.bottom - shows.top), (outer.left - shows.left, outer.top - shows.top)))
+}
+
+fn owner_of(hwnd: HWND) -> u32 {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    pid
+}
+
+/// When a process started, as Windows counts time; 0 when it would not say.
+fn born_of(process: HANDLE) -> u64 {
+    let (mut born, mut ended, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+    match unsafe { GetProcessTimes(process, &mut born, &mut ended, &mut kernel, &mut user) } {
+        Ok(()) => (born.dwHighDateTime as u64) << 32 | born.dwLowDateTime as u64,
+        Err(_) => 0,
+    }
+}
+
+/// The windows of other programs that stay above the others: visible, not minimized, not cloaked,
+/// not the taskbar or the desktop, not covering their whole screen, and big enough to be a panel.
+/// Asks nothing of the windows themselves, front to back.
+pub fn top_windows() -> Vec<TopWindow> {
+    unsafe extern "system" fn each(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let found = &mut *(lp.0 as *mut Vec<TopWindow>);
+        // The panel's own windows first, before anything is asked of them (see app_windows)
+        let pid = owner_of(hwnd);
+        if pid == GetCurrentProcessId() || !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            return BOOL(1);
+        }
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        if ex & WS_EX_TOPMOST.0 == 0 {
+            return BOOL(1);
+        }
+        let mut cloaked = 0u32;
+        let _ = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, 4);
+        let class = class_of(hwnd);
+        if cloaked != 0 || matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+            return BOOL(1);
+        }
+        let Some((rect, border)) = frame_of(hwnd) else { return BOOL(1) };
+        if rect.2 < 16 || rect.3 < 16 {
+            return BOOL(1);
+        }
+        let mut screen = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut screen).as_bool() {
+            let m = screen.rcMonitor;
+            if rect.0 <= m.left && rect.1 <= m.top && rect.0 + rect.2 >= m.right && rect.1 + rect.3 >= m.bottom {
+                return BOOL(1);
+            }
+        }
+        // A window region is asked for into a region of our own; ERROR says it has none
+        let region = CreateRectRgn(0, 0, 0, 0);
+        let cut = GetWindowRgn(hwnd, region) != GDI_REGION_TYPE(0);
+        let _ = DeleteObject(region.into());
+        let see_through = ex & (WS_EX_LAYERED.0 | WS_EX_NOREDIRECTIONBITMAP.0) != 0 || cut;
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return BOOL(1) };
+        let path = path_behind(process);
+        let program = program_behind(process);
+        let born = born_of(process);
+        let _ = CloseHandle(process);
+        if let (Some(path), Some((exe, family))) = (path, program) {
+            found.push(TopWindow { id: WindowId { hwnd: hwnd.0 as isize, pid, born }, exe, family, path, class, rect, border, see_through });
+        }
+        BOOL(1)
+    }
+    let mut found: Vec<TopWindow> = Vec::new();
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut found as *mut Vec<TopWindow> as isize));
+    }
+    found
+}
+
+/// Whether a window is still the one seen: its handle belongs to the same process, and that is the
+/// same run of a program, since Windows may give a closed process's number to a new one.
+pub fn still(id: WindowId) -> bool {
+    if owner_of(HWND(id.hwnd as _)) != id.pid {
+        return false;
+    }
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, id.pid) else { return false };
+        let born = born_of(process);
+        let _ = CloseHandle(process);
+        born == id.born
+    }
+}
+
+/// Whether a window is still where and as large as it was seen, and still the one seen.
+pub fn unchanged(window: &TopWindow) -> bool {
+    still(window.id) && frame_of(HWND(window.id.hwnd as _)).is_some_and(|(rect, _)| rect == window.rect)
+}
+
+/// Moves a window of another program so what shows of it starts at `(x, y)`: not resized, not
+/// raised and not activated, and its place among the windows that stay above the others kept.
+/// The move is handed to the window's own thread, so a program that hangs holds up nothing here.
+/// A handle that belongs to another process, or to another run of the program, by now is not
+/// touched. Returns where the window shows right after, which a quick program has already
+/// reached; a refusal says Windows' reason, as a window of a program with rights above the
+/// panel's gets.
+pub fn place_other(window: &TopWindow, x: i32, y: i32) -> Result<(i32, i32), String> {
+    let hwnd = HWND(window.id.hwnd as _);
+    if !still(window.id) {
+        return Err("the window is gone".into());
+    }
+    let (bx, by) = window.border;
+    unsafe {
+        SetWindowPos(hwnd, None, x + bx, y + by, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS)
+            .map_err(|e| format!("{} ({:#x})", e.message(), e.code().0))?;
+    }
+    let (wx, wy, _, _) = window_rect(window.id.hwnd).ok_or("the window is gone")?;
+    Ok((wx - bx, wy - by))
+}
+
 /// For each wanted `(program file name in lower case, window title)`: is such a window visible
 /// right now? Any visible window counts, overlays and tool windows included. The title is read
 /// from the system's own copy, which asks nothing of the window.
@@ -558,6 +857,15 @@ mod tests {
         // No process has the number 0 for a program to open, and no handle is 0
         assert_eq!(rights_of_process(0), Rights::Unknown);
         assert_eq!(rights_behind(HANDLE::default()), Rights::Unknown);
+    }
+
+    #[test]
+    fn a_running_program_is_found_by_its_file_name() {
+        let own = std::env::current_exe().unwrap();
+        let name = own.file_name().unwrap().to_string_lossy().to_uppercase();
+        let found = process_paths(&name);
+        assert!(found.iter().any(|p| p.eq_ignore_ascii_case(&own.to_string_lossy())), "{found:?}");
+        assert!(process_paths("no-such-program-here.exe").is_empty());
     }
 }
 

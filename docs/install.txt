@@ -1,0 +1,34 @@
+# Install Tapka for the person, or add their programs to it
+
+Tapka is a touch panel for Windows 11: a capsule of big keys at a screen edge that open programs
+and send keyboard shortcuts, with small meters under the keys.
+
+Talk to the person in their language. Follow the tapka-setup skill: it checks the machine,
+installs Tapka with the person's help, finds their programs, asks one question with a short list,
+adds keys and meters to the settings file, and verifies the result. Later, when the person names
+more programs, the same skill adds them.
+
+If you can install skills, download every file below into your skills directory, keeping the
+paths inside tapka-setup. Claude Code uses ~/.claude/skills/tapka-setup; Codex uses
+~/.agents/skills/tapka-setup. Then read SKILL.md and follow it.
+
+Otherwise, fetch SKILL.md and follow its steps. Read each reference when its step calls for it.
+
+Files of release v1.4.0:
+
+- tapka-setup/SKILL.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/SKILL.md
+- tapka-setup/references/install.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/install.md
+- tapka-setup/references/find.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/find.md
+- tapka-setup/references/settings.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/settings.md
+- tapka-setup/references/meters.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/meters.md
+- tapka-setup/references/verify.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/verify.md
+- tapka-setup/scripts/candidates.ps1
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/scripts/candidates.ps1
+- tapka-setup/scripts/capsule.ps1
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/scripts/capsule.ps1

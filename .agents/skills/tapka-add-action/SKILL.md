@@ -10,7 +10,7 @@ Only actions that work on any Windows 11 with nothing installed belong here.
    `("open", "ms-settings:")`), and name plus hint in `ru` and `en`. Use the names Windows
    itself uses in each language.
 2. The keys must be ones `src/keys.rs` knows: modifiers, letters, digits, F1–F24, navigation keys.
-3. To put it into a new user's first capsule, add the id to `DEFAULT_ITEMS`. Usually: do not.
+3. To put it into a new user's first capsule, it would go into `default_ids` in `src/config.rs`, which holds four keys so all show without scrolling. Usually: do not.
 4. Add it to the list of ready-made actions in `README.md` and `README.ru.md`.
 5. Run `sh scripts/check.sh`. The test `every_ready_action_makes_a_valid_item_in_both_languages`
    checks the new line.

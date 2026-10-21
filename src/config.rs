@@ -33,6 +33,26 @@ pub struct Item {
     pub action: Action,
 }
 
+/// A meter: a small dial of a program's progress or of a number in a file. In the file:
+/// `{ "name": "Render", "program": "C:\\Tools\\render.exe" }` or `{ "name": "Backup", "file": "D:\\backup.txt" }`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Meter {
+    pub name: String,
+    pub source: Source,
+    /// The id a program gives its windows when it gives one of its own, which its taskbar button
+    /// then shows instead of the exe. Kept from the program list when the meter is added. In the
+    /// file: `"app"`.
+    pub app: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Source {
+    /// What an `open` item would open: the path of an exe or a `shell:AppsFolder\…` address.
+    Program(String),
+    /// A text file whose first number is the percent.
+    File(String),
+}
+
 /// `"theme"` in the file: `"dark"`, `"light"`, or anything else for "as Windows has it".
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Theme {
@@ -47,6 +67,37 @@ pub enum Lang {
     System,
     Ru,
     En,
+}
+
+/// A docked panel: the window of another program the user ticked, told by the full path of its
+/// program and its window class, which stay the same across restarts where its title does not. In
+/// the file: `{ "exe": "panel.exe", "path": "C:\\Tools\\panel.exe", "class": "PanelWindow" }`.
+/// An entry of an older version is the file name alone, `"panel.exe"`: any window of a program of
+/// that name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Docked {
+    /// The program's file name, lower case: what is shown, and what an entry without a path goes by.
+    pub exe: String,
+    pub path: Option<String>,
+    pub class: Option<String>,
+}
+
+impl Docked {
+    /// What tells one entry from another, and what the panel remembers its window by.
+    pub fn key(&self) -> String {
+        match &self.path {
+            Some(path) => format!("{}|{}", path.to_lowercase(), self.class.as_deref().unwrap_or("")),
+            None => self.exe.clone(),
+        }
+    }
+
+    /// Whether a window of the program at `path`, of class `class`, is this entry's.
+    pub fn matches(&self, exe: &str, path: &str, class: &str) -> bool {
+        match &self.path {
+            Some(own) => own.eq_ignore_ascii_case(path) && self.class.as_deref().is_none_or(|c| c == class),
+            None => self.exe == exe,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,6 +123,16 @@ pub struct Settings {
     /// In the file: `"folded_at"`.
     pub folded_at: f64,
     pub items: Vec<Item>,
+    pub meters: Vec<Meter>,
+    /// The share of the room for keys and meters that the keys take, once the divider between them
+    /// was moved. In the file: `"divider"`.
+    pub divider: Option<f64>,
+    /// How many key cells long the capsule was stretched to by its end grip; none, and it is as
+    /// long as its keys, up to four (`layout::keys_length`). In the file: `"length"`.
+    pub length: Option<usize>,
+    /// The panels of other programs that stand under the capsule and go along with it, in the
+    /// order they stand. In the file: `"docked"`.
+    pub docked: Vec<Docked>,
 }
 
 impl Settings {
@@ -90,6 +151,10 @@ impl Settings {
             folded: false,
             folded_at: DEFAULT_TOP,
             items: Vec::new(),
+            meters: Vec::new(),
+            divider: None,
+            length: None,
+            docked: Vec::new(),
         }
     }
 }
@@ -145,8 +210,13 @@ pub const PRESETS: [Preset; 30] = [
 const HOLD_HINT: (&str, &str) =
     ("До повторного касания, отпускается сам через 20 с без нажатий", "Until tapped again; lets go by itself after 20 s without taps");
 
-/// The ready actions a new settings file starts with, in this order.
-pub const DEFAULT_ITEMS: [&str; 5] = ["snip", "paste", "voice", "explorer", "settings"];
+/// The ready actions a new settings file starts with, in this order: four, so all show without
+/// scrolling. Chosen once, by what the machine has when the first file is written: with a keyboard
+/// attached the on-screen keyboard gives way to Redo, the pair of Undo for drawing; with a pen File
+/// Explorer gives way to Hold Shift.
+pub fn default_ids(keyboard: bool, pen: bool) -> [&'static str; 4] {
+    ["undo", "snip", if keyboard { "redo" } else { "keyboard" }, if pen { "holdshift" } else { "explorer" }]
+}
 
 /// The item of the settings file a ready action makes, named in Russian or in English.
 pub fn preset_item(preset: &Preset, russian: bool) -> Value {
@@ -339,9 +409,10 @@ pub fn set_items(set: &[Value], existing: &[Value], found: impl Fn(&str) -> bool
     Some((added, had, missing))
 }
 
-/// The file written on first run: ready actions of Windows only, named in the system's language.
-pub fn default_text(russian: bool) -> String {
-    let items: Vec<Value> = DEFAULT_ITEMS
+/// The file written on first run: ready actions of Windows only, named in the system's language,
+/// for a machine with or without a `keyboard` attached and a `pen` (`default_ids`).
+pub fn default_text(russian: bool, keyboard: bool, pen: bool) -> String {
+    let items: Vec<Value> = default_ids(keyboard, pen)
         .iter()
         .filter_map(|id| PRESETS.iter().find(|p| p.id == *id))
         .map(|p| preset_item(p, russian))
@@ -368,7 +439,7 @@ pub fn to_text(v: &Value) -> String {
     let fields: Vec<String> = map
         .iter()
         .map(|(key, value)| {
-            let text = match value.as_array().filter(|items| key == "items" && !items.is_empty()) {
+            let text = match value.as_array().filter(|items| (key == "items" || key == "meters" || key == "docked") && !items.is_empty()) {
                 Some(items) => format!("[\n{}\n  ]", items.iter().map(|i| format!("    {}", inline(i))).collect::<Vec<_>>().join(",\n")),
                 None => inline(value),
             };
@@ -393,6 +464,12 @@ pub fn with_field(text: &str, key: &str, value: Value) -> Option<String> {
         }
     }
     Some(to_text(&v))
+}
+
+/// Whether the settings text says the welcome of the first run is over: `"tour_done": true`. The
+/// name is the one the three-step tour of earlier builds wrote, so a file it finished stays finished.
+pub fn tour_done(text: &str) -> bool {
+    serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')).is_ok_and(|v| v.get("tour_done") == Some(&Value::Bool(true)))
 }
 
 /// The settings text after a carry: the capsule is at `edge` now, and `along` it stands the
@@ -491,6 +568,35 @@ pub fn parse_item(v: &Value) -> Result<Item, String> {
     Ok(Item { name, icon: text_field(v, "icon"), hint: text_field(v, "hint"), lit, only_in, action })
 }
 
+/// One meter of the file, or why it cannot be used. It has one source: a program or a file.
+pub fn parse_meter(v: &Value) -> Result<Meter, String> {
+    let name = text_field(v, "name").ok_or("no name")?;
+    let source = match (text_field(v, "program"), text_field(v, "file")) {
+        (Some(program), None) => Source::Program(program),
+        (None, Some(file)) => Source::File(file),
+        (Some(_), Some(_)) => return Err("both a program and a file".into()),
+        (None, None) => return Err("no program and no file".into()),
+    };
+    Ok(Meter { name, source, app: text_field(v, "app") })
+}
+
+/// The file name of a program, lower case, from its name or its path; none from what names no file.
+fn file_name(text: &str) -> Option<String> {
+    let name = text.trim().rsplit(['\\', '/']).next()?.trim().to_lowercase();
+    (!name.is_empty()).then_some(name)
+}
+
+/// One docked entry of the file, or why it cannot be used: the file name alone, or an object with
+/// the path and the class of the window.
+pub fn parse_docked(v: &Value) -> Result<Docked, String> {
+    if let Some(name) = v.as_str() {
+        return file_name(name).map(|exe| Docked { exe, path: None, class: None }).ok_or("not a program file name".into());
+    }
+    let path = text_field(v, "path");
+    let exe = text_field(v, "exe").or_else(|| path.clone()).and_then(|e| file_name(&e)).ok_or("not a program file name")?;
+    Ok(Docked { exe, path, class: text_field(v, "class") })
+}
+
 /// Parses the settings text. `Err` means the whole file is invalid (not JSON, or no `items`).
 /// Broken items are skipped; each one adds a line with its 1-based number and the reason.
 pub fn parse(text: &str) -> Result<(Settings, Vec<String>), String> {
@@ -502,6 +608,21 @@ pub fn parse(text: &str) -> Result<(Settings, Vec<String>), String> {
         match parse_item(item) {
             Ok(it) => good.push(it),
             Err(why) => skipped.push(format!("item {} skipped: {why}", i + 1)),
+        }
+    }
+    let mut meters = Vec::new();
+    for (i, meter) in v.get("meters").and_then(Value::as_array).into_iter().flatten().enumerate() {
+        match parse_meter(meter) {
+            Ok(m) => meters.push(m),
+            Err(why) => skipped.push(format!("meter {} skipped: {why}", i + 1)),
+        }
+    }
+    let mut docked: Vec<Docked> = Vec::new();
+    for (i, entry) in v.get("docked").and_then(Value::as_array).into_iter().flatten().enumerate() {
+        match parse_docked(entry) {
+            Ok(d) if !docked.iter().any(|o| o.key() == d.key()) => docked.push(d),
+            Ok(_) => {}
+            Err(why) => skipped.push(format!("docked {} skipped: {why}", i + 1)),
         }
     }
     let word = |key: &str| v.get(key).and_then(Value::as_str);
@@ -530,24 +651,59 @@ pub fn parse(text: &str) -> Result<(Settings, Vec<String>), String> {
         folded: v.get("folded").and_then(Value::as_bool).unwrap_or(false),
         folded_at: v.get("folded_at").and_then(Value::as_f64).unwrap_or(DEFAULT_TOP),
         items: good,
+        meters,
+        divider: v.get("divider").and_then(Value::as_f64).filter(|d| d.is_finite()).map(|d| d.clamp(0.0, 1.0)),
+        length: v.get("length").and_then(Value::as_u64).map(|l| (l as usize).max(crate::layout::LEAST)),
+        docked,
     };
     Ok((settings, skipped))
 }
 
-/// Reads the settings file, writing the default one first, in Russian or in English, if the file
-/// does not exist. The last value says whether the file was created just now.
-pub fn load_or_create(path: &Path, russian: bool) -> Result<(Settings, Vec<String>, bool), String> {
+/// Reads the settings file, writing the default one first if the file does not exist: `first`
+/// makes its text (`default_text`) and is asked only then. The last value says whether the file
+/// was created just now.
+pub fn load_or_create(path: &Path, first: impl FnOnce() -> String) -> Result<(Settings, Vec<String>, bool), String> {
     let created = !path.exists();
     if created {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("cannot create folder: {e}"))?;
         }
-        std::fs::write(path, default_text(russian)).map_err(|e| format!("cannot write settings: {e}"))?;
+        std::fs::write(path, first()).map_err(|e| format!("cannot write settings: {e}"))?;
     }
     let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read settings: {e}"))?;
     // Notepad may save with a byte-order mark
     let (settings, skipped) = parse(text.trim_start_matches('\u{feff}'))?;
     Ok((settings, skipped, created))
+}
+
+/// Changes the settings file at `path`: reads it as it is on the disk now, lets `change` make the
+/// new text of that, and puts the new text in its place with `ReplaceFileW`, which keeps the version
+/// replaced as `settings.json.bak` in the same step, so a reader never finds the file half written
+/// and no save is lost between a copy and a rename. Whatever an editor saved since the panel last
+/// read the file is in what `change` gets; one that saves while the new text is being made is found
+/// just before the replacement, and the file is read and changed again, up to three times. A file
+/// that cannot be read, or is not a JSON object, is left as it is.
+pub fn change_file(path: &Path, mut change: impl FnMut(&str) -> Option<String>) -> Result<(), String> {
+    let tmp = path.with_extension("json.tmp");
+    for _ in 0..3 {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read settings: {e}"))?;
+        let text_now = change(&text).ok_or("the settings file is not a JSON object, so it is left as it is")?;
+        std::fs::write(&tmp, text_now).map_err(|e| format!("cannot write settings: {e}"))?;
+        if std::fs::read_to_string(path).ok().as_deref() != Some(text.as_str()) {
+            continue;
+        }
+        return replace_file(path, &tmp, &path.with_extension("json.bak"));
+    }
+    let _ = std::fs::remove_file(&tmp);
+    Err("the settings file kept changing while it was saved, so it is left as it is".into())
+}
+
+/// Puts `with` in the place of `path`, which becomes `backup`, in one step.
+fn replace_file(path: &Path, with: &Path, backup: &Path) -> Result<(), String> {
+    use windows::core::HSTRING;
+    use windows::Win32::Storage::FileSystem::{ReplaceFileW, REPLACE_FILE_FLAGS};
+    let name = |p: &Path| HSTRING::from(p.as_os_str());
+    unsafe { ReplaceFileW(&name(path), &name(with), &name(backup), REPLACE_FILE_FLAGS(0), None, None) }.map_err(|e| format!("cannot write settings: {e}"))
 }
 
 /// The name of version 0.1.0's data folder, which stands next to the current one.
@@ -658,6 +814,21 @@ mod tests {
     }
 
     #[test]
+    fn the_welcome_is_over_once_the_flag_says_so_and_the_flag_keeps_the_rest() {
+        let first = default_text(true, true, true);
+        assert!(!tour_done(&first));
+        // Over: written once, and nothing else of the file changed
+        let over = with_field(&first, "tour_done", json!(true)).unwrap();
+        assert!(tour_done(&over));
+        assert_eq!(parse(&over).unwrap().0, parse(&first).unwrap().0);
+        let own = with_field(OWN, "tour_done", json!(true)).unwrap();
+        assert!(own.contains("  \"note\": \"mine\",\n  \"tour_done\": true,\n  \"items\": ["), "{own}");
+        // Anything but true is not over; neither is a file that is not JSON
+        assert!(!tour_done(&with_field(&first, "tour_done", json!("yes")).unwrap()));
+        assert!(!tour_done("not json"));
+    }
+
+    #[test]
     fn an_item_is_moved_among_the_items_the_panel_uses() {
         let file = |names: &[&str]| {
             let items: Vec<Value> = names.iter().map(|n| if *n == "broken" { json!({ "name": n }) } else { json!({ "name": n, "action": "open", "target": "x" }) }).collect();
@@ -708,7 +879,7 @@ mod tests {
     fn the_tap_sound_is_off_unless_the_file_asks_for_it() {
         // A file from before the switch existed, the default file, and anything that is not a switch
         assert!(!parse(r#"{"items":[]}"#).unwrap().0.click_sound);
-        assert!(!parse(&default_text(true)).unwrap().0.click_sound);
+        assert!(!parse(&default_text(true, false, false)).unwrap().0.click_sound);
         assert!(!Settings::empty().click_sound);
         assert!(!parse(r#"{"click_sound":"yes","items":[]}"#).unwrap().0.click_sound);
         assert!(parse(r#"{"click_sound":true,"items":[]}"#).unwrap().0.click_sound);
@@ -728,7 +899,7 @@ mod tests {
     fn a_folded_capsule_is_written_into_the_file_and_the_rest_of_the_file_is_kept() {
         // A file from before the capsule could fold, the default file, and anything that is not a switch
         assert!(!parse(OWN).unwrap().0.folded);
-        assert!(!parse(&default_text(true)).unwrap().0.folded);
+        assert!(!parse(&default_text(true, false, false)).unwrap().0.folded);
         assert!(!parse(r#"{"folded":"yes","folded_at":"low","items":[]}"#).unwrap().0.folded);
         // Folding writes two fields before the items; the owner's field, `lit` and the item of a
         // kind this version does not know stay as they were
@@ -749,6 +920,114 @@ mod tests {
         // An open capsule carried there keeps the folded key's place instead
         let (s, _) = parse(&with_landing(&back, Edge::Left, false, 0.3).unwrap()).unwrap();
         assert_eq!((s.edge, s.folded_at, s.top), (Edge::Left, 0.6124, 0.3));
+    }
+
+    #[test]
+    fn meters_and_the_divider_are_written_into_the_file_and_the_rest_of_the_file_is_kept() {
+        // A file from before the meters: none, and no divider
+        let (s, skipped) = parse(OWN).unwrap();
+        assert!(s.meters.is_empty() && s.divider.is_none() && skipped.len() == 1);
+        // The settings window writes the list, one meter per line, before the items; the owner's
+        // field, `lit`, the item of a kind this version does not know and a meter's own field stay
+        let meters = json!([
+            { "name": "Render", "program": "C:\\Tools\\render.exe", "app": "Vendor.Render", "mine": 2 },
+            { "name": "Backup", "file": "D:\\backup.txt" },
+            { "name": "Both", "program": "a.exe", "file": "b.txt" },
+            { "name": "None" },
+        ]);
+        let out = with_field(OWN, "meters", meters).and_then(|text| with_field(&text, "divider", share(0.61237))).unwrap();
+        assert!(out.contains("  \"note\": \"mine\",\n  \"meters\": [\n    { \"name\": \"Render\", \"program\": \"C:\\\\Tools\\\\render.exe\", \"app\": \"Vendor.Render\", \"mine\": 2 },\n"), "{out}");
+        assert!(out.contains("  \"divider\": 0.6124,\n  \"items\": ["), "{out}");
+        assert!(out.contains(r#""lit": { "program": "recorder.exe", "window": "Recording" }"#));
+        assert!(out.contains(r#"{ "name": "Later", "action": "script", "run": ["a", "b"] }"#));
+        let (s, skipped) = parse(&out).unwrap();
+        assert_eq!(
+            s.meters,
+            [
+                Meter { name: "Render".into(), source: Source::Program("C:\\Tools\\render.exe".into()), app: Some("Vendor.Render".into()) },
+                Meter { name: "Backup".into(), source: Source::File("D:\\backup.txt".into()), app: None },
+            ]
+        );
+        assert_eq!(s.divider, Some(0.6124));
+        assert!(skipped.contains(&"meter 3 skipped: both a program and a file".to_string()), "{skipped:?}");
+        assert!(skipped.contains(&"meter 4 skipped: no program and no file".to_string()), "{skipped:?}");
+        // Read back and written again, the text stays as it is
+        assert_eq!(to_text(&serde_json::from_str::<Value>(&out).unwrap()), out);
+        // Moving the divider changes that one line; an empty list is no meters
+        let moved = with_field(&out, "divider", share(0.25)).unwrap();
+        assert_eq!(moved, out.replace("0.6124", "0.25"));
+        let none = with_field(&out, "meters", json!([])).unwrap();
+        assert!(none.contains("  \"meters\": [],\n") && parse(&none).unwrap().0.meters.is_empty(), "{none}");
+        // Odd values do not break the file
+        let (s, _) = parse(r#"{"meters":"x","divider":"low","items":[]}"#).unwrap();
+        assert!(s.meters.is_empty() && s.divider.is_none());
+        assert_eq!(parse(r#"{"divider":7,"items":[]}"#).unwrap().0.divider, Some(1.0));
+    }
+
+    #[test]
+    fn the_length_is_written_into_the_file_and_the_rest_of_the_file_is_kept() {
+        // A file from before the end grip: no length, the capsule as long as its keys
+        assert_eq!(parse(OWN).unwrap().0.length, None);
+        // The release of the grip writes the length, and with it the place when that moved; the
+        // owner's field, `lit` and the item of a kind this version does not know stay
+        let out = with_field(OWN, "length", json!(6)).and_then(|text| with_field(&text, "top", share(0.21237))).unwrap();
+        assert!(out.contains("  \"note\": \"mine\",\n  \"length\": 6,\n  \"items\": ["), "{out}");
+        assert!(out.contains(r#""lit": { "program": "recorder.exe", "window": "Recording" }"#));
+        assert!(out.contains(r#"{ "name": "Later", "action": "script", "run": ["a", "b"] }"#));
+        let (s, _) = parse(&out).unwrap();
+        assert_eq!((s.length, s.top, s.items.len()), (Some(6), 0.2124, 1));
+        // A new length changes that one line
+        assert_eq!(with_field(&out, "length", json!(3)).unwrap(), out.replace("\"length\": 6", "\"length\": 3"));
+        // Odd values do not break the file: fewer than two cells are two, what is not a count is none
+        assert_eq!(parse(r#"{"length":1,"items":[]}"#).unwrap().0.length, Some(2));
+        assert_eq!(parse(r#"{"length":0,"items":[]}"#).unwrap().0.length, Some(2));
+        for odd in ["-3", "2.5", "\"long\"", "null"] {
+            assert_eq!(parse(&format!(r#"{{"length":{odd},"items":[]}}"#)).unwrap().0.length, None, "{odd}");
+        }
+    }
+
+    #[test]
+    fn the_docked_programs_are_written_into_the_file_and_the_rest_of_the_file_is_kept() {
+        // A file from before docking docks nothing
+        assert!(parse(OWN).unwrap().0.docked.is_empty());
+        // The settings window writes the list, one entry per line, before the items; an entry's own
+        // field, the owner's field and the items, the one this version does not know included, stay
+        let entries = json!([
+            { "exe": "panel.exe", "path": "C:\\Tools\\Panel.exe", "class": "PanelWindow", "mine": 1 },
+            "other.exe",
+        ]);
+        let out = with_field(OWN, "docked", entries).unwrap();
+        assert_eq!(
+            out,
+            OWN.replace(
+                "  \"items\": [",
+                "  \"docked\": [\n    { \"exe\": \"panel.exe\", \"path\": \"C:\\\\Tools\\\\Panel.exe\", \"class\": \"PanelWindow\", \"mine\": 1 },\n    \"other.exe\"\n  ],\n  \"items\": ["
+            )
+        );
+        let (s, skipped) = parse(&out).unwrap();
+        let panel = Docked { exe: "panel.exe".into(), path: Some("C:\\Tools\\Panel.exe".into()), class: Some("PanelWindow".into()) };
+        assert_eq!(s.docked, [panel.clone(), Docked { exe: "other.exe".into(), path: None, class: None }]);
+        assert_eq!(s.items.len(), 1);
+        assert_eq!(skipped, ["item 2 skipped: unknown action \"script\""]);
+        assert_eq!(to_text(&serde_json::from_str::<Value>(&out).unwrap()), out);
+        // Undocking the last one leaves an empty list and everything else as it was
+        let none = with_field(&out, "docked", json!([])).unwrap();
+        assert_eq!(none, OWN.replace("  \"items\": [", "  \"docked\": [],\n  \"items\": ["));
+        assert!(parse(&none).unwrap().0.docked.is_empty());
+        // Written by hand: a path is its file name, the same entry twice is one, and what names no
+        // program is skipped and said
+        let (s, skipped) = parse(r#"{"docked":["C:\\Tools\\Panel.EXE"," panel.exe ",7,"","b.exe",{"class":"X"},{"path":"D:\\p.exe"}],"items":[]}"#).unwrap();
+        assert_eq!(s.docked.iter().map(|d| d.exe.as_str()).collect::<Vec<_>>(), ["panel.exe", "b.exe", "p.exe"]);
+        assert_eq!(s.docked[2].path.as_deref(), Some("D:\\p.exe"));
+        assert_eq!(skipped, ["docked 3 skipped: not a program file name", "docked 4 skipped: not a program file name", "docked 6 skipped: not a program file name"]);
+        assert!(parse(r#"{"docked":"panel.exe","items":[]}"#).unwrap().0.docked.is_empty());
+        // An entry with a path goes by the path and the class; an old one by the file name
+        assert!(panel.matches("panel.exe", "c:\\tools\\panel.exe", "PanelWindow"));
+        assert!(!panel.matches("panel.exe", "D:\\Copy\\panel.exe", "PanelWindow"));
+        assert!(!panel.matches("panel.exe", "C:\\Tools\\Panel.exe", "Tooltip"));
+        let old = Docked { exe: "panel.exe".into(), path: None, class: None };
+        assert!(old.matches("panel.exe", "D:\\Copy\\panel.exe", "Anything"));
+        assert_ne!(old.key(), panel.key());
     }
 
     #[test]
@@ -790,7 +1069,7 @@ mod tests {
         copied.sort();
         assert_eq!(copied, ["icons/own.png", "settings.json"]);
         // The copied file is read as it is, not taken for a first run
-        let (s, _, created) = load_or_create(&new.join("settings.json"), false).unwrap();
+        let (s, _, created) = load_or_create(&new.join("settings.json"), String::new).unwrap();
         assert_eq!((s.top, created), (0.4, false));
         assert_eq!(std::fs::read(new.join("icons").join("own.png")).unwrap(), [1, 2, 3]);
         assert!(!new.join("panel.log").exists());
@@ -799,7 +1078,82 @@ mod tests {
         // A settings file already in the new folder is never replaced
         std::fs::write(new.join("settings.json"), r#"{"top":0.9,"items":[]}"#).unwrap();
         assert!(migrate(&old, &new).unwrap().is_empty());
-        assert_eq!(load_or_create(&new.join("settings.json"), false).unwrap().0.top, 0.9);
+        assert_eq!(load_or_create(&new.join("settings.json"), String::new).unwrap().0.top, 0.9);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_save_keeps_what_an_editor_wrote_since_the_panel_read_the_file() {
+        let dir = std::env::temp_dir().join(format!("tapka-change-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, OWN).unwrap();
+        // The panel reads the file; then its owner adds a field and a key in an editor
+        let (read, _, _) = load_or_create(&path, String::new).unwrap();
+        assert_eq!(read.items.len(), 1);
+        let edited = OWN.replace("\"note\": \"mine\",", "\"note\": \"mine\",\n  \"later\": [1, 2],").replace(
+            "\"items\": [",
+            "\"items\": [\n    { \"name\": \"Paint\", \"action\": \"open\", \"target\": \"C:\\\\Tools\\\\paint.exe\" },",
+        );
+        std::fs::write(&path, &edited).unwrap();
+        // The panel saves the divider: the editor's field and key are there, and so is the divider
+        change_file(&path, |text| with_field(text, "divider", share(0.3))).unwrap();
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["later"], json!([1, 2]));
+        assert_eq!(saved["divider"], json!(0.3));
+        assert_eq!(saved["items"][0]["name"], "Paint");
+        assert_eq!(parse(&std::fs::read_to_string(&path).unwrap()).unwrap().0.items.len(), 2);
+        // The version it replaced is kept beside it
+        assert_eq!(std::fs::read_to_string(dir.join("settings.json.bak")).unwrap(), edited);
+        // A file that is not JSON any more is not replaced, and the copy is not touched
+        std::fs::write(&path, "{ half a file").unwrap();
+        assert!(change_file(&path, |text| with_field(text, "divider", share(0.5))).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ half a file");
+        assert_eq!(std::fs::read_to_string(dir.join("settings.json.bak")).unwrap(), edited);
+        // Nor is a file that cannot be read
+        assert!(change_file(&dir.join("gone.json"), |text| with_field(text, "divider", share(0.5))).is_err());
+        assert!(!dir.join("gone.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_save_that_meets_an_editor_s_save_reads_the_file_again_and_gives_up_after_three() {
+        let dir = std::env::temp_dir().join(format!("tapka-conflict-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, OWN).unwrap();
+        // An editor saves while the panel makes its new text, once: the panel starts over from it
+        let edited = OWN.replace("\"note\": \"mine\"", "\"note\": \"edited\"");
+        let mut seen = Vec::new();
+        change_file(&path, |text| {
+            seen.push(text.to_string());
+            if seen.len() == 1 {
+                std::fs::write(&path, &edited).unwrap();
+            }
+            with_field(text, "divider", share(0.3))
+        })
+        .unwrap();
+        assert_eq!(seen, [OWN.to_string(), edited.clone()]);
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!((saved["note"].as_str(), saved["divider"].as_f64()), (Some("edited"), Some(0.3)));
+        assert_eq!(std::fs::read_to_string(dir.join("settings.json.bak")).unwrap(), edited);
+        // A second save replaces the kept copy with the version it replaced
+        change_file(&path, |text| with_field(text, "divider", share(0.4))).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(dir.join("settings.json.bak")).unwrap()).unwrap()["divider"], json!(0.3));
+        // An editor that saves every time: after three tries nothing is written over it
+        let before = std::fs::read_to_string(&path).unwrap();
+        let mut n = 0;
+        let result = change_file(&path, |text| {
+            n += 1;
+            std::fs::write(&path, format!("{before}{}", " ".repeat(n))).unwrap();
+            with_field(text, "divider", share(0.9))
+        });
+        assert!(result.is_err());
+        assert_eq!(n, 3);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("{before}   "));
+        assert!(!dir.join("settings.json.tmp").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -813,7 +1167,9 @@ mod tests {
             }
         }
         let ids: Vec<_> = PRESETS.iter().map(|p| p.id).collect();
-        assert!(DEFAULT_ITEMS.iter().all(|id| ids.contains(id)));
+        for (keyboard, pen) in [(false, false), (true, false), (false, true), (true, true)] {
+            assert!(default_ids(keyboard, pen).iter().all(|id| ids.contains(id)));
+        }
     }
 
     #[test]
@@ -1049,16 +1405,30 @@ mod tests {
 
     #[test]
     fn the_default_file_has_windows_actions_in_the_language_asked_for() {
-        let names = |russian| -> Vec<String> { parse(&default_text(russian)).unwrap().0.items.into_iter().map(|i| i.name).collect() };
-        assert_eq!(names(true), ["Снимок", "Вставить", "Голосовой ввод", "Проводник", "Параметры"]);
-        assert_eq!(names(false), ["Snip", "Paste", "Voice typing", "File Explorer", "Settings"]);
-        let text = default_text(false);
-        assert!(text.starts_with("{\n  \"scale\": 1.0,\n  \"top\": 0.3,\n  \"items\": [\n    { \"name\": \"Snip\", \"icon\": \"snip\", "), "{text}");
+        let names = |russian, keyboard, pen| -> Vec<String> { parse(&default_text(russian, keyboard, pen)).unwrap().0.items.into_iter().map(|i| i.name).collect() };
+        // A tablet without a keyboard or a pen; a keyboard attached; a pen; both
+        assert_eq!(names(true, false, false), ["Отменить", "Снимок", "Клавиатура", "Проводник"]);
+        assert_eq!(names(true, true, false), ["Отменить", "Снимок", "Повторить", "Проводник"]);
+        assert_eq!(names(true, false, true), ["Отменить", "Снимок", "Клавиатура", "Держать Shift"]);
+        assert_eq!(names(true, true, true), ["Отменить", "Снимок", "Повторить", "Держать Shift"]);
+        assert_eq!(names(false, false, false), ["Undo", "Snip", "Keyboard", "File Explorer"]);
+        assert_eq!(names(false, true, true), ["Undo", "Snip", "Redo", "Hold Shift"]);
+        // Each set shows whole on the capsule, with nothing to scroll
+        for (keyboard, pen) in [(false, false), (true, false), (false, true), (true, true)] {
+            assert!(parse(&default_text(true, keyboard, pen)).unwrap().0.items.len() <= crate::layout::SHOWN);
+        }
+        let text = default_text(false, false, false);
+        assert!(text.starts_with("{\n  \"scale\": 1.0,\n  \"top\": 0.3,\n  \"items\": [\n    { \"name\": \"Undo\", \"icon\": \"undo\", "), "{text}");
         let (s, skipped) = parse(&text).unwrap();
         assert!(skipped.is_empty(), "{skipped:?}");
         assert_eq!(s.top, DEFAULT_TOP);
-        assert_eq!(s.items[0].action, Action::Hotkey("win+shift+s".into()));
-        assert_eq!(s.items[4].action, Action::Open("ms-settings:".into()));
+        assert_eq!(s.items[0].action, Action::Hotkey("ctrl+z".into()));
+        assert_eq!(s.items[1].action, Action::Hotkey("win+shift+s".into()));
+        assert_eq!(s.items[2].action, Action::Hotkey("win+ctrl+o".into()));
+        assert_eq!(s.items[3].action, Action::Hotkey("win+e".into()));
+        let drawing = parse(&default_text(false, true, true)).unwrap().0;
+        assert_eq!(drawing.items[2].action, Action::Hotkey("ctrl+y".into()));
+        assert_eq!(drawing.items[3].action, Action::Hold("shift".into()));
         // Nothing of any one machine or of another product
         assert!(s.items.iter().all(|i| i.lit.is_none() && i.only_in.is_none()));
     }

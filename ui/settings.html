@@ -104,9 +104,29 @@
   .grip svg{width:14px;height:14px}
   .chev{flex:none;width:16px;height:16px;color:var(--dim)}
   .tag{display:inline-block;padding:0 7px;border-radius:5px;background:var(--s3);color:var(--ink-2);font-size:11.5px;line-height:18px;margin-right:6px;vertical-align:1px}
-  .intro{display:flex;gap:14px;align-items:flex-start;padding:14px 12px 14px 16px}
-  .intro .lbl b{font-weight:600}
-  .intro .lbl small{font-size:13px;color:var(--ink-2)}
+  #meters-head,#docked-head{margin:28px 0 8px}
+  #meters-head h2,#docked-head h2{margin:0 2px}
+  .tick{flex:none;width:20px;height:20px;border-radius:5px;box-shadow:inset 0 0 0 1px var(--dim);display:grid;place-items:center;color:var(--on-accent)}
+  .tick svg{width:14px;height:14px;visibility:hidden}
+  .on>.tick{background:var(--accent-fill);box-shadow:none}
+  .on>.tick svg{visibility:visible}
+  /* The card of programs: each a chip with its icon and a tick */
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{display:flex;align-items:center;gap:8px;height:42px;padding:0 10px 0 5px;border:0;border-radius:8px;background:var(--s2);box-shadow:var(--hi);max-width:220px}
+  .chip>span:nth-child(2){flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip.on{box-shadow:inset 0 0 0 2px var(--accent)}
+  .acts{display:flex;gap:8px;align-items:center;flex:1}
+  /* The welcome of the first run: this page alone in a small window beside the capsule, with the
+     card of programs and nothing else */
+  body.welcome{background:var(--dlg)}
+  body.welcome #app{display:none}
+  #welcome{display:flex;flex-direction:column;gap:8px;height:100%;padding:18px 20px 16px}
+  #welcome h1{font-size:22px;margin:0}
+  #welcome .sub{font-size:13.5px;color:var(--ink-2)}
+  /* The window is as tall as the card (fitWelcome); on a screen too short for it the programs scroll */
+  #welcome .chips{flex:0 1 auto;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;margin-top:8px}
+  #welcome .chip{max-width:none}
+  #welcome .acts{flex:none;margin-top:auto;padding-top:8px}
 
   /* Look */
   .themes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px}
@@ -189,10 +209,17 @@
   <main id="pane">
     <section id="s-items" class="on">
       <div class="head"><h1 data-t="nav_items"></h1><button class="btn acc" id="add" data-t="add"></button></div>
-      <div class="group intro" id="intro" hidden><span class="key" id="intro-key"></span><div class="lbl"><b data-t="intro_1"></b><small data-t="intro_2"></small></div><button class="x" id="intro-close"></button></div>
       <div class="group" id="file-error" hidden><div class="row"><div class="lbl"><b class="problem" data-t="file_error"></b><details><summary data-t="more"></summary><div class="more why" id="file-why"></div></details></div><button class="btn" id="file-open" data-t="open"></button></div></div>
+      <div class="group" id="repaired" hidden></div>
       <div class="group" id="items"></div>
       <p class="foot" id="items-foot" data-t="items_foot"></p>
+      <p class="foot" id="find-line"><button class="link" id="find" data-t="find"></button></p>
+      <div class="head" id="meters-head"><h2 data-t="meters"></h2><button class="btn" id="add-meter" data-t="meter_add"></button></div>
+      <div class="group" id="meters"></div>
+      <p class="foot" id="meters-foot" data-t="meters_foot"></p>
+      <div class="head" id="docked-head"><h2 data-t="docked"></h2><button class="btn" id="add-docked" data-t="dock_add"></button></div>
+      <div class="group" id="docked"></div>
+      <p class="foot" id="docked-foot" data-t="docked_foot"></p>
     </section>
     <section id="s-look">
       <h1 data-t="nav_look"></h1>
@@ -236,9 +263,17 @@
     </section>
   </main>
 </div>
+<div id="welcome" hidden><h1 data-t="find"></h1></div>
 <div id="shade"><div id="dialog"><header><button class="x" id="back" hidden></button><span id="title"></span><button class="x" id="close"></button></header><div id="body"></div><footer id="foot"></footer></div></div>
 <div id="toast"><span id="toast-text"></span><button class="btn" id="toast-undo" data-t="undo"></button></div>
 <script>
+  // The browser's own menu (Back, Refresh, Print) and its reload and print keys are no part of the
+  // window: a reload in the middle of a card loses it. Text fields keep their menu of cut and paste
+  addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
+  addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if (k === 'f5' || ((e.ctrlKey || e.metaKey) && (k === 'r' || k === 'p'))) e.preventDefault();
+  });
   const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
   const $ = id => document.getElementById(id);
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
@@ -247,11 +282,13 @@
     ru: {
       nav_items: 'Пункты', nav_look: 'Вид', nav_general: 'Общие', nav_about: 'О программе',
       add: 'Добавить', undo: 'Отменить', open: 'Открыть', save: 'Сохранить', cancel: 'Отмена', more: 'Подробнее',
-      intro_1: 'Клавиши капсулы запускают программы и нажимают сочетания за вас.',
-      intro_2: 'Соберите свои кнопкой «Добавить». Порядок меняется перетаскиванием за точки.',
+      find: 'Найти мои программы', find_sub: 'Отмеченные станут клавишами капсулы. Лишнюю снимите касанием.',
+      find_none: 'Своих программ не нашлось. Добавить их можно в настройках кнопкой «Добавить».', not_now: 'Не сейчас', close: 'Закрыть',
       items_foot: 'Чтобы поменять порядок, перетащите строку за точки слева.',
       empty: 'Пунктов пока нет. Нажмите «Добавить».', file_error: 'Файл настроек не читается, пункты не изменены',
       remove: 'Удалить', removed: 'Пункт удалён: ', broken: 'Пункт не работает: коснитесь, чтобы исправить', broken_card: 'Пункт не работает',
+      lost: 'Программа не найдена', path_updated: 'Путь обновлён: ', found_in: 'Нашлась в ', use_it: 'Подставить',
+      card_busy: 'Сначала сохраните или закройте открытую карточку',
       line_app: 'Программа', line_site: 'Сайт', line_link: 'Ссылка', line_folder: 'Папка', line_file: 'Файл', line_keys: 'Сочетание ',
       line_action: 'Действие Windows', line_hold: 'Держит ', line_page: 'Параметры: ', line_settings: 'Параметры Windows', only_tag: 'только в ',
       theme: 'Тема', theme_system: 'Как в Windows', theme_dark: 'Тёмная', theme_light: 'Светлая',
@@ -293,15 +330,32 @@
       set_not: 'Это не набор клавиш Tapka',
       set_large: 'Клавиш слишком много для одного файла: в набор входит не больше 200',
       set_taken: 'Файл с таким именем и окончанием .tapka уже есть. Выберите другое имя',
+      meters: 'Шкалы', meter_add: 'Добавить шкалу', meters_empty: 'Шкал нет. Шкала показывает прогресс программы или число из файла',
+      meters_foot: 'Шкалы стоят в капсуле под клавишами. Черту между клавишами и шкалами можно тянуть пальцем.',
+      meter_app: 'Программа', meter_app_sub: 'Панель сама найдёт прогресс на панели задач или в окнах программы',
+      meter_file: 'Файл', meter_file_sub: 'Текстовый файл с числом от 0 до 100',
+      meter_line_app: 'Прогресс программы', meter_line_file: 'Число из файла ', meter_removed: 'Шкала удалена: ',
+      meter_broken: 'Шкала не работает: удалите её или исправьте файл настроек',
+      privacy_4: 'Читает прогресс с панели задач для программ ваших клавиш и шкал, из окон программ, которые вы выбрали для шкал, и файл, который вы выбрали',
+      privacy_6: 'Если программа клавиши, шкалы или панели пропала, ищет её файл в «Пуске», среди запущенных программ и в соседних папках',
+      docked: 'Стыковка', dock_add: 'Пристыковать панель', docked_empty: 'Пристыкованных панелей нет. Панель другой программы у того же края можно поставить под капсулу',
+      docked_foot: 'Tapka ставит выбранные панели под капсулой и ведёт их вместе с ней.',
+      dock_line: 'Стоит под капсулой', dock_back: 'Возвращается на своё место, Tapka её не двигает', dock_removed: 'Панель отстыкована: ',
+      dock_title: 'Панели у края капсулы', dock_go: 'Пристыковать', dock_pick: 'Отметьте панели, которые пристыковать',
+      dock_none: 'У края капсулы сейчас нет панелей других программ поверх окон', dock_loading: 'Ищу панели у края…',
+      dock_refused: 'Windows не даёт Tapka её двигать', dock_several: 'Несколько окон — выберите заново', dock_missing: 'Программа не найдена', dock_broken: 'Запись не работает: удалите её или исправьте файл настроек',
+      privacy_5: 'Двигает только окна программ, которые вы пристыковали, и смотрит, где стоят окна поверх всех',
     },
     en: {
       nav_items: 'Items', nav_look: 'Look', nav_general: 'General', nav_about: 'About',
       add: 'Add', undo: 'Undo', open: 'Open', save: 'Save', cancel: 'Cancel', more: 'Details',
-      intro_1: 'The capsule keys start programs and press shortcuts for you.',
-      intro_2: 'Add your own with the Add button. Drag an item by its dots to change the order.',
+      find: 'Find my programs', find_sub: 'The ticked ones become capsule keys. Tap one to untick it.',
+      find_none: 'No programs of yours were found. Add them in the settings with Add.', not_now: 'Not now', close: 'Close',
       items_foot: 'To change the order, drag a row by the dots on its left.',
       empty: 'No items yet. Press Add.', file_error: 'The settings file cannot be read; the items are unchanged',
       remove: 'Remove', removed: 'Item removed: ', broken: 'This item does not work: tap to fix it', broken_card: 'This item does not work',
+      lost: 'Program not found', path_updated: 'Path updated: ', found_in: 'Found in ', use_it: 'Use it',
+      card_busy: 'Save or close the open card first',
       line_app: 'Program', line_site: 'Website', line_link: 'Link', line_folder: 'Folder', line_file: 'File', line_keys: 'Shortcut ',
       line_action: 'Windows action', line_hold: 'Holds ', line_page: 'Settings: ', line_settings: 'Windows Settings', only_tag: 'only in ',
       theme: 'Theme', theme_system: 'Same as Windows', theme_dark: 'Dark', theme_light: 'Light',
@@ -343,6 +397,21 @@
       set_not: 'This is not a Tapka key set',
       set_large: 'Too many keys for one file: a set holds 200 at most',
       set_taken: 'A .tapka file with this name is already there. Choose another name',
+      meters: 'Meters', meter_add: 'Add a meter', meters_empty: 'No meters. A meter shows a program\'s progress or a number from a file',
+      meters_foot: 'Meters sit in the capsule under the keys. Drag the line between the keys and the meters with a finger.',
+      meter_app: 'Program', meter_app_sub: 'The panel finds the progress on the taskbar or in the program\'s windows',
+      meter_file: 'File', meter_file_sub: 'A text file with a number from 0 to 100',
+      meter_line_app: 'Program progress', meter_line_file: 'Number from the file ', meter_removed: 'Meter removed: ',
+      meter_broken: 'This meter does not work: remove it or fix the settings file',
+      privacy_4: 'Reads progress from the taskbar for the programs of your keys and meters, from the windows of the programs you chose for meters, and the file you chose',
+      privacy_6: 'When the program of a key, a meter or a panel is gone, looks for its file in Start, among running programs and in nearby folders',
+      docked: 'Docking', dock_add: 'Dock a panel', docked_empty: 'No docked panels. A panel of another program at the same edge can stand under the capsule',
+      docked_foot: 'Tapka puts the chosen panels under the capsule and carries them along.',
+      dock_line: 'Stands under the capsule', dock_back: 'Returns to its own place, Tapka leaves it alone', dock_removed: 'Panel undocked: ',
+      dock_title: 'Panels at the capsule\'s edge', dock_go: 'Dock', dock_pick: 'Tick the panels to dock',
+      dock_none: 'No always-on-top panel of another program is at the capsule\'s edge right now', dock_loading: 'Looking for panels at the edge…',
+      dock_refused: 'Windows does not let Tapka move it', dock_several: 'Several windows — pick again', dock_missing: 'Program not found', dock_broken: 'This entry does not work: remove it or fix the settings file',
+      privacy_5: 'Moves only the windows of the programs you docked, and looks where always-on-top windows stand',
     },
   };
   let S = null;            // what Rust last said about the settings
@@ -360,9 +429,14 @@
     plus: line('<path d="M12 5v14M5 12h14"/>'),
     send: line('<path d="M4 12 20 4l-6 16-3-7z"/>'),
     eye: line('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>'),
+    tick: line('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
     shield: line('<path d="M12 3 4.5 6v5.5c0 4.5 3.2 8 7.5 9.5 4.3-1.5 7.5-5 7.5-9.5V6z"/>'),
   };
-  for (const [id, icon] of [['back', 'back'], ['close', 'x'], ['intro-close', 'x'], ['intro-key', 'bolt']]) $(id).innerHTML = ICON[icon];
+  for (const [id, icon] of [['back', 'back'], ['close', 'x']]) $(id).innerHTML = ICON[icon];
+  // The welcome window of the first run is this page too, opened as settings.html#welcome
+  const WELCOME = location.hash === '#welcome';
+  document.body.classList.toggle('welcome', WELCOME);
+  $('welcome').hidden = !WELCOME;
 
   // ---------- theme, accent, language
   // The accent as it should sit on a surface: lighter or darker in the same hue until it reads
@@ -397,7 +471,7 @@
     document.documentElement.lang = lang;
     for (const e of document.querySelectorAll('[data-t]')) e.textContent = t(e.dataset.t);
     for (const b of $('edge').children) b.title = t('edge_' + b.dataset.v);
-    $('privacy').replaceChildren(...[['send', 'privacy_1'], ['eye', 'privacy_2'], ['shield', 'privacy_3']].map(([icon, key]) =>
+    $('privacy').replaceChildren(...[['send', 'privacy_1'], ['eye', 'privacy_2'], ['eye', 'privacy_4'], ['eye', 'privacy_5'], ['eye', 'privacy_6'], ['shield', 'privacy_3']].map(([icon, key]) =>
       el('div', { className: 'row' }, svgKey(ICON[icon], 'small'), el('div', { className: 'lbl' }, el('b', { textContent: t(key), style: 'font-size:13.5px' })))));
     document.title = 'Tapka — ' + t('nav_' + document.querySelector('.nav.on').dataset.s);
   }
@@ -496,20 +570,23 @@
     drawItems();
     return invoke('save_items', { items }).catch(e => toast(String(e)));
   }
-  let introClosed = false;
-  $('intro-close').onclick = () => { introClosed = true; $('intro').hidden = true; };
   function drawItems() {
-    $('intro').hidden = !S.intro || introClosed;
     $('file-error').hidden = !S.error;
     $('file-why').textContent = S.error || '';
     // With the file unreadable there is nothing true to list and nowhere to add to
-    $('items').hidden = $('items-foot').hidden = !!S.error;
-    $('add').disabled = !!S.error;
+    $('items').hidden = $('items-foot').hidden = $('find-line').hidden = !!S.error;
+    $('add').disabled = $('add-meter').disabled = $('add-docked').disabled = !!S.error;
+    // The programs whose path the panel put right since this window was opened
+    const repaired = S.repaired || [];
+    $('repaired').hidden = !repaired.length;
+    $('repaired').replaceChildren(...repaired.map(r => el('div', { className: 'row' }, el('span', { className: 'lbl' },
+      el('b', { className: 'ell', textContent: t('path_updated') + r.name }), el('small', { className: 'ell', textContent: r.path })))));
     const rows = S.items.map((item, i) => {
       // An item for one program says which, before its line
       const only = str(fields(item.raw).only_in).trim();
       const tag = only ? [el('span', { className: 'tag', textContent: t('only_tag') + (item.only || only.replace(/\.exe$/i, '')) })] : [];
-      const sub = item.problem ? el('small', { className: 'problem ell', textContent: t('broken') }) : el('small', { className: 'ell' }, ...tag, lineOf(item.raw));
+      const sub = item.problem ? el('small', { className: 'problem ell', textContent: t('broken') })
+        : item.lost ? el('small', { className: 'problem ell' }, ...tag, t('lost')) : el('small', { className: 'ell' }, ...tag, lineOf(item.raw));
       const row = el('button', { className: 'row', onclick: e => { if (!e.target.closest('.grip')) editItem(i); } },
         el('span', { className: 'grip', innerHTML: ICON.grip }), keyOf(item),
         el('span', { className: 'lbl' }, el('b', { className: 'ell', textContent: nameOf(item.raw) }), sub), el('span', { className: 'chev', innerHTML: ICON.chev }));
@@ -519,6 +596,7 @@
     $('items').replaceChildren(...(rows.length ? rows : [el('div', { className: 'say', textContent: t('empty') })]));
   }
   let undo = null, toastTimer = null;
+  // `back` undoes what the toast tells of
   function toast(text, back) {
     $('toast-text').textContent = text;
     undo = back || null;
@@ -527,12 +605,188 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => $('toast').classList.remove('on'), back ? 6000 : 3000);
   }
-  $('toast-undo').onclick = () => { $('toast').classList.remove('on'); if (undo) save(undo); };
+  $('toast-undo').onclick = () => { $('toast').classList.remove('on'); if (undo) undo(); };
   function removeItem(i) {
     const before = raws();
-    toast(t('removed') + nameOf(before[i]), before);
+    toast(t('removed') + nameOf(before[i]), () => save(before));
     save(before.filter((_, n) => n !== i));
   }
+
+  // ---------- the card of programs: those pinned to the taskbar, then those with windows open, up
+  // to eight, all ticked. *Add* puts the ticked ones at the end of the list, without those the list
+  // holds by then, and tells Rust how many: the capsule brings them into view and asks for a tap.
+  // On the first run the card is the whole of a small window beside the capsule (`#welcome`);
+  // later the quiet line under the items opens it as a dialog. `close` ends it either way, once
+  // the file has the new keys; a save that failed leaves the card as it was and says why. While a
+  // save runs nothing can be saved again: a second press would write a shorter list over the first.
+  // `drawn` is told each time the card is drawn anew with the programs found, in its place
+  function programCard(close, drawn = () => {}) {
+    const words = el('div', { className: 'sub', textContent: t('find_sub') });
+    const chips = el('div', { className: 'chips' }, say('loading'));
+    const acts = el('div', { className: 'acts' });
+    const ticked = new Set();
+    let found = null, saving = false;
+    const norm = target => target.trim().replace(/\//g, '\\').toLowerCase();
+    const ready = () => { add.disabled = saving || !found || !ticked.size; };
+    const add = btn('add', async () => {
+      if (saving) return;
+      const have = raws().filter(r => fields(r).action === 'open').map(r => norm(str(fields(r).target)));
+      const chosen = found.filter(a => ticked.has(a) && !have.includes(norm(a.target))).map(a => ({ name: a.name, action: 'open', target: a.target }));
+      if (chosen.length) {
+        saving = true;
+        ready();
+        try {
+          await invoke('save_items', { items: raws().concat(chosen), added: chosen.length });
+        } catch (e) {
+          saving = false;
+          ready();
+          return toast(String(e));
+        }
+      }
+      close();
+    }, 'acc');
+    const chip = a => {
+      const key = svgKey(ICON.app, 'small');
+      invoke('icon_of', { target: a.target }).then(icon => { if (icon) key.replaceChildren(picture(icon)); });
+      const c = el('button', { className: 'chip' + (ticked.has(a) ? ' on' : ''), title: a.name, onclick: () => {
+        if (!ticked.delete(a)) ticked.add(a);
+        c.classList.toggle('on', ticked.has(a));
+        ready();
+      } }, key, el('span', { textContent: a.name }), el('span', { className: 'tick', innerHTML: ICON.tick }));
+      return c;
+    };
+    // Nothing found: a line that says so, and only a way out
+    const draw = () => {
+      if (found && !found.length) {
+        words.textContent = t('find_none');
+        chips.replaceChildren();
+        acts.replaceChildren(spring(), btn('close', close, 'acc'));
+        return drawn();
+      }
+      ready();
+      chips.replaceChildren(...(found ? found.map(chip) : [say('loading')]));
+      acts.replaceChildren(spring(), btn('not_now', close), add);
+      // While the programs are listed the card is not what it will be: the welcome window waits
+      if (found) drawn();
+    };
+    draw();
+    invoke('first_programs').then(f => { found = f || []; for (const a of found) ticked.add(a); draw(); });
+    return [words, chips, acts];
+  }
+  $('find').onclick = () => { const [words, chips, acts] = programCard(closeDialog); dialog(t('find'), [words, chips], [acts], true); };
+
+  // ---------- the meters: each reads a program the user chose or a file the user chose
+  const meterRaws = () => S.meters.map(m => m.raw);
+  // The list on the page changes at once; when the file could not be written it goes back to what
+  // it was and is read again, so the page never shows a list the panel does not follow, and the
+  // next save does not write it
+  function saveMeters(list) {
+    const before = S.meters;
+    S.meters = list.map(raw => before.find(m => m.raw === raw) || { raw, icon: null, problem: null });
+    drawMeters();
+    return invoke('save_meters', { meters: list }).catch(e => { S.meters = before; drawMeters(); toast(String(e)); return refresh(); });
+  }
+  // A meter is told by where its number comes from: a program, or a file by its name only
+  function drawMeters() {
+    $('meters').hidden = $('meters-head').hidden = $('meters-foot').hidden = !!S.error;
+    const rows = S.meters.map((m, i) => {
+      const file = str(fields(m.raw).file).trim();
+      const sub = m.problem ? el('small', { className: 'problem ell', textContent: t('meter_broken') })
+        : el('small', { className: 'ell', textContent: file ? t('meter_line_file') + file.split(/[\\/]/).pop() : t('meter_line_app') });
+      const key = m.icon ? el('span', { className: 'key' }, picture(m.icon)) : svgKey(file ? ICON.file : ICON.app);
+      return el('div', { className: 'row meter' }, key, el('span', { className: 'lbl' }, el('b', { className: 'ell', textContent: nameOf(m.raw) }), sub),
+        btn('remove', () => removeMeter(i), 'danger'));
+    });
+    $('meters').replaceChildren(...(rows.length ? rows : [say('meters_empty')]));
+  }
+  function removeMeter(i) {
+    const before = meterRaws();
+    toast(t('meter_removed') + nameOf(before[i]), () => saveMeters(before));
+    saveMeters(before.filter((_, n) => n !== i));
+  }
+  function appendMeter(raw) { closeDialog(); return saveMeters([...meterRaws(), raw]); }
+  // A program from the same list as a new key's, or a file from a Windows dialog
+  function addMeter() {
+    const file = () => window.__TAURI__.dialog.open({ multiple: false }).then(path => {
+      if (path) appendMeter({ name: path.replace(/[\\/]+$/, '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '') || path, file: path });
+    });
+    const kinds = [['meter_app', svgKey(ICON.app), () => { steps.push(addMeter); programList(t('meter_app'), a => appendMeter({ name: a.name, program: a.target, ...(a.app ? { app: a.app } : {}) }));
+ }],
+      ['meter_file', svgKey(ICON.file), file]];
+    dialog(t('meter_add'), [el('div', { className: 'group' }, ...kinds.map(([kind, key, go]) => pick(key, t(kind), t(kind + '_sub'), go)))], [], true);
+  }
+  $('add-meter').onclick = addMeter;
+
+  // ---------- docking: panels of other programs, each told by its program's path and its window
+  // class, stand under the capsule. An entry of an older version is the program's file name alone
+  const dockedRaws = () => S.docked.map(d => d.raw);
+  const exeOf = raw => (typeof raw === 'string' ? raw : str(fields(raw).exe)).trim().toLowerCase();
+  // Whether a docked entry already takes the panel a candidate entry would dock
+  const takes = (raw, candidate) => {
+    const f = fields(raw), c = fields(candidate);
+    if (typeof raw === 'string' || !str(f.path)) return exeOf(raw) === exeOf(candidate);
+    return str(f.path).toLowerCase() === str(c.path).toLowerCase() && str(f.class) === str(c.class);
+  };
+  // As the meters: the list changes at once and goes back, read again, when the file could not be
+  // written. `known` are the cards of the panels just ticked, each with its window, which its entry
+  // goes by from now on
+  function saveDocked(list, known = []) {
+    const before = S.docked;
+    S.docked = list.map(raw => before.find(d => d.raw === raw) || known.find(d => d.raw === raw) || { raw, name: exeOf(raw).replace(/\.exe$/, ''), icon: null, state: 'placed' });
+    drawDocked();
+    const chosen = known.map(p => p.window).filter(Boolean);
+    return invoke('save_docked', { docked: list, chosen }).catch(e => { S.docked = before; drawDocked(); toast(String(e)); return refresh(); });
+  }
+  const programKey = p => p.icon ? el('span', { className: 'key' }, picture(p.icon)) : svgKey(ICON.app);
+  const DOCK_LINE = { placed: 'dock_line', returns: 'dock_back', refused: 'dock_refused', several: 'dock_several', missing: 'dock_missing', broken: 'dock_broken' };
+  function drawDocked() {
+    $('docked').hidden = $('docked-head').hidden = $('docked-foot').hidden = !!S.error;
+    const rows = S.docked.map((d, i) => {
+      const line = DOCK_LINE[d.state] || 'dock_line';
+      return el('div', { className: 'row dock' }, programKey(d),
+        el('span', { className: 'lbl' }, el('b', { className: 'ell', textContent: d.name }),
+          el('small', { className: 'ell' + (line === 'dock_line' ? '' : ' problem'), textContent: t(line) })),
+        btn('remove', () => removeDocked(i), 'danger'));
+    });
+    $('docked').replaceChildren(...(rows.length ? rows : [say('docked_empty')]));
+  }
+  function removeDocked(i) {
+    const before = dockedRaws(), cards = [...S.docked];
+    toast(t('dock_removed') + S.docked[i].name, () => saveDocked(before, cards));
+    saveDocked(before.filter((_, n) => n !== i));
+  }
+  // The panels at the capsule's edge now, those already docked left out; the ticked ones are
+  // docked after them, in the order they are listed. Two windows of one program and class are
+  // one entry: ticking one of them unticks the other
+  function addDocked() {
+    const list = el('div', { className: 'group', id: 'dock-list' }, say('dock_loading'));
+    const ticked = new Set();
+    let found = [];
+    const go = btn('dock_go', () => {
+      if (!ticked.size) return toast(t('dock_pick'));
+      const chosen = found.filter(p => ticked.has(p));
+      closeDialog();
+      saveDocked([...dockedRaws(), ...chosen.map(p => p.raw)], chosen);
+    }, 'acc');
+    dialog(t('dock_title'), [list], [spring(), go], true);
+    invoke('dock_candidates').then(all => {
+      found = (all || []).filter(p => !dockedRaws().some(raw => takes(raw, p.raw)));
+      const rows = new Map();
+      for (const p of found) {
+        const row = pick(programKey(p), p.name, exeOf(p.raw), () => {
+          if (!ticked.delete(p)) {
+            for (const q of [...ticked]) if (takes(q.raw, p.raw)) ticked.delete(q);
+            ticked.add(p);
+          }
+          for (const [q, r] of rows) r.classList.toggle('on', ticked.has(q));
+        });
+        row.append(el('span', { className: 'tick', innerHTML: ICON.tick }));
+        rows.set(p, row);
+      }
+      list.replaceChildren(...(found.length ? rows.values() : [say('dock_none')]));
+    });
+  }
+  $('add-docked').onclick = addDocked;
   $('file-open').onclick = () => invoke('open_settings_file');
 
   // Order: an item is carried by its dots with a finger, a pen or a mouse; the others make room
@@ -575,7 +829,10 @@
 
   // ---------- the dialog
   let steps = [];
+  // Whether the item's card on screen has edits not saved yet; null while no card is open
+  let cardEdits = null;
   function dialog(title, body, foot = [], root = false) {
+    cardEdits = null;
     if (root) steps = [];
     $('title').textContent = title;
     $('body').replaceChildren(...body);
@@ -584,7 +841,7 @@
     $('back').hidden = steps.length === 0;
     $('shade').classList.add('on');
   }
-  const closeDialog = () => { $('shade').classList.remove('on'); steps = []; stopKeys(); };
+  const closeDialog = () => { $('shade').classList.remove('on'); steps = []; cardEdits = null; stopKeys(); };
   $('close').onclick = closeDialog;
   $('back').onclick = () => { stopKeys(); const back = steps.pop(); if (back) back(); };
   // A press beside the dialog closes it on the click, not on the press: closed on the press, the
@@ -644,16 +901,18 @@
     }, { root: $('body') });
     return seen;
   };
-  function programPick(a, seen) {
-    const row = pick(svgKey(ICON.app), a.name, '', () => append({ name: a.name, action: 'open', target: a.target }));
+  function programPick(a, seen, chosen) {
+    const row = pick(svgKey(ICON.app), a.name, '', () => chosen(a));
     row.dataset.target = a.target;
     seen.observe(row);
     return row;
   }
 
-  // A program: those pinned to the taskbar on top, read anew each time, then all of the Start menu
+  // A program: those pinned to the taskbar on top, read anew each time, then all of the Start
+  // menu. `chosen` is given the one tapped
   let apps = null;
-  function addApp() {
+  const addApp = () => programList(t('kind_app'), a => append({ name: a.name, action: 'open', target: a.target }));
+  function programList(title, chosen) {
     const search = text('', t('search'));
     const top = el('div', { id: 'pinned-list' }), list = el('div', { className: 'group', id: 'app-list' });
     let pinned = null;
@@ -662,13 +921,13 @@
       const q = search.value.trim().toLowerCase();
       top.hidden = !!q;
       top.replaceChildren(el('div', { className: 'glabel', textContent: t('pinned') }),
-        el('div', { className: 'group' }, ...(!pinned ? [say('loading')] : pinned.length ? pinned.map(a => programPick(a, seen)) : [say('pinned_none')])));
+        el('div', { className: 'group' }, ...(!pinned ? [say('loading')] : pinned.length ? pinned.map(a => programPick(a, seen, chosen)) : [say('pinned_none')])));
       if (!apps) return list.replaceChildren(say('loading'));
       const found = apps.filter(a => a.name.toLowerCase().includes(q)).slice(0, 300);
-      list.replaceChildren(...(found.length ? found.map(a => programPick(a, seen)) : [say('nothing')]));
+      list.replaceChildren(...(found.length ? found.map(a => programPick(a, seen, chosen)) : [say('nothing')]));
     };
     search.oninput = draw;
-    dialog(t('kind_app'), [search, top, el('div', { className: 'glabel', textContent: t('all_apps') }), list]);
+    dialog(title, [search, top, el('div', { className: 'glabel', textContent: t('all_apps') }), list]);
     draw();
     invoke('pinned_apps').then(found => { pinned = found || []; if (list.isConnected) draw(); });
     if (!apps) invoke('installed_apps').then(found => { apps = found || []; if (list.isConnected) draw(); });
@@ -856,12 +1115,16 @@
       target = text(str(raw.target), t('target'));
       const browse = directory => window.__TAURI__.dialog.open({ directory, multiple: false }).then(path => { if (path) target.value = path; });
       const page = kind === 'page' && S.pages.find(p => p.item.target.toLowerCase() === str(raw.target).trim().toLowerCase());
-      const sub = kind === 'app' ? t('does_app_sub') : page ? page.item.name : '';
-      box = el('div', { className: 'does' }, el('span', { className: 'lbl' }, el('b', { textContent: t('does_' + (kind || 'file')) }), ...(sub ? [el('small', { textContent: sub })] : [])));
+      // A program that is gone says so, and its path is open to choose another
+      const sub = item.lost ? t('lost') : kind === 'app' ? t('does_app_sub') : page ? page.item.name : '';
+      box = el('div', { className: 'does' }, el('span', { className: 'lbl' }, el('b', { textContent: t('does_' + (kind || 'file')) }), ...(sub ? [el('small', { className: item.lost ? 'problem' : '', textContent: sub })] : [])));
       more = [target, el('div', { className: 'inline' }, btn('pick_file', () => browse(false)), btn('pick_folder', () => browse(true)))];
     }
     if (item.problem) box = broken;
-    const does = box ? [box, ...(more.length || why.length ? [details([...why, ...more], !!item.problem)] : [])] : [];
+    // Found in one other place, which may be another program of the same file name: one tap puts it in
+    const offer = item.found ? [el('div', { className: 'inline', style: 'margin-top:8px' }, el('span', { className: 'sub ell', textContent: t('found_in') + item.found, style: 'flex:1' }),
+      btn('use_it', () => invoke('use_path', { target: str(raw.target) }).then(closeDialog).catch(e => toast(String(e))), 'acc'))] : [];
+    const does = box ? [box, ...offer, ...(more.length || why.length ? [details([...why, ...more], !!item.problem || !!item.lost)] : [])] : [];
     // The picture: the program's own, one of the built-in ones, or a file of the user's; the
     // built-in ones open on request
     let icon = str(raw.icon), open = false;
@@ -887,22 +1150,28 @@
       if (keys && !keys.value()) return toast(t('need_key'));
       if (target && !target.value.trim()) return toast(t('need_target'));
       if (where.missing()) return toast(t('need_program'));
-      // The fields are set in place, so their order in the file and the fields not shown here stay
-      const set = (k, v) => { if (v) raw[k] = v; else delete raw[k]; };
-      raw.name = name.value.trim();
-      set('icon', icon);
-      set('hint', hint.value.trim());
-      if (where.value() !== before) set('only_in', where.value());
-      if (keys) raw.keys = keys.value();
-      if (target) raw.target = target.value.trim();
-      const items = raws();
-      items[i] = raw;
+      // Only what the card changed goes onto the item as the file has it now: the panel may have put
+      // its path right while the card was open. The fields are set in place, so their order in the
+      // file and the fields not shown here stay
+      const changed = [['name', name.value.trim()], ['icon', icon], ['hint', hint.value.trim()], ['only_in', where.value(), before],
+        ...(keys ? [['keys', keys.value()]] : []), ...(target ? [['target', target.value.trim()]] : [])].filter(([k, v, was = str(item.raw[k]).trim()]) => v !== was);
       closeDialog();
-      save(items);
+      refresh().then(() => {
+        const same = S.items.findIndex(x => JSON.stringify(x.raw) === JSON.stringify(item.raw));
+        const at = same >= 0 ? same : Math.min(i, S.items.length);
+        const fresh = { ...(S.items[at] ? fields(S.items[at].raw) : raw) };
+        for (const [k, v] of changed) { if (v) fresh[k] = v; else delete fresh[k]; }
+        const items = raws();
+        items[at] = fresh;
+        save(items);
+      });
     }, 'acc');
+    const look = () => JSON.stringify([name.value, hint.value, icon, where.value(), keys && keys.value(), target && target.value]);
+    const start = look();
     dialog(t('edit_title'), [el('div', { className: 'namebox' }, big, name), field(t('hint'), hint),
       ...(does.length ? [field(t('does'), ...does)] : []), field(t('icon'), glyphs), field(t('only_in'), where.node)],
       [remove, spring(), btn('cancel', closeDialog), done], true);
+    cardEdits = () => look() !== start;
   }
 
   // ---------- look and general: every change goes to the file at once and shows at once
@@ -971,11 +1240,38 @@
   $('update-go').onclick = () => { S.update = { state: 'loading' }; drawUpdate(); invoke('install_update').catch(e => { S.update = { state: 'failed', why: String(e) }; drawUpdate(); }); };
 
   // ---------- everything comes from Rust and is drawn anew whenever the file changes
+  let welcomed = false;
+  // The welcome window is made as tall as its card, programs whole, and Rust keeps it beside the
+  // capsule and inside the work area. The card is measured as tall as its content, fractions of a
+  // pixel and all: heights added up whole pixel by whole pixel came out short of a few, and the
+  // programs scrolled in a window meant to hold them. One pixel more covers the rounding to the
+  // screen's pixels
+  function fitWelcome() {
+    const box = $('welcome');
+    box.style.height = 'auto';
+    const height = box.getBoundingClientRect().height;
+    box.style.height = '';
+    invoke('fit_welcome', { height: Math.ceil(height) + 1 });
+  }
   function refresh() {
     return invoke('get_settings').then(s => {
       S = s;
-      paint(); words(); drawPrefs();
+      S.meters = S.meters || [];
+      S.docked = S.docked || [];
+      paint(); words(); drawPrefs(); drawMeters(); drawDocked();
       if (!carried) drawItems();
+      // The welcome window shows its card once, in the language and the theme of the settings
+      if (WELCOME && !welcomed) {
+        welcomed = true;
+        $('welcome').append(...programCard(() => invoke('close_welcome'), fitWelcome));
+      }
+      // A tap on a grey key of the capsule opens that item's card
+      // ...unless a card with edits not saved yet is open: those are not thrown away
+      if (!WELCOME && S.card != null && S.items[S.card]) {
+        if (cardEdits && cardEdits()) toast(t('card_busy'));
+        else { show('items'); editItem(S.card); }
+      }
+
     });
   }
   window.__TAURI__.event.listen('reload', refresh);

@@ -26,6 +26,11 @@ Step-by-step recipes are skills in `.agents/skills`, one folder each with its SK
 (Claude Code reads the pointers in `.claude/skills`): adding a ready-made Windows action,
 adding a built-in icon, running the checks, starting a preview.
 
+`tapka-setup` is of another kind: it is for an agent on a user's machine, not for work on the code.
+It installs Tapka and adds the user's programs as keys and meters; `docs/install.txt` hands it to
+the agent and names its files by the release tag, so a new file of the skill goes into that list
+too. It names no other program and no path of the owner's machine, like the code.
+
 ## What holds everywhere
 
 - No paths, package names or names of other products in the code. Users add those themselves.

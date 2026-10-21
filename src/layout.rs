@@ -1,8 +1,8 @@
 //! Capsule geometry in CSS px at scale 1. The capsule is a 60 px thick strip docked flush to a
-//! screen edge: a drag handle at its start, then up to four items, one 54 px cell each (a 46 px
-//! key inside), then a small plus that opens the editor. More items than four scroll in their place,
-//! and the edge of the next one peeks out, faded, to say so. At the left and right edges the
-//! capsule stands upright; at the top edge it lies flat.
+//! screen edge: a drag handle at its start, then up to four items, or as many cells as it was
+//! stretched to, one 54 px cell each (a 46 px key inside), then a small plus that opens the editor.
+//! More items than that scroll in their place, and the edge of the next one peeks out, faded, to
+//! say so. At the left and right edges the capsule stands upright; at the top edge it lies flat.
 //!
 //! The window never changes size while the capsule is in use: it always includes the room where
 //! the name label appears. What is visible and takes presses is cut out of it with a window
@@ -50,35 +50,112 @@ pub fn cell(tablet: bool) -> f64 {
     }
 }
 
-/// How many items the capsule shows at once; the rest scroll.
+/// How many items the capsule shows at once until it is stretched; the rest scroll.
 pub const SHOWN: usize = 4;
+/// The fewest cells a capsule may be stretched to.
+pub const LEAST: usize = 2;
 /// How much of the next item shows past the last shown one when there are more.
 pub const PEEK: f64 = 18.0;
 
 /// The foot of the pill, where the small plus sits. A tap on the plus opens two signs in its
-/// place, the gear and the fold arrow, each as long as the plus: the pill is one `ADD` longer
-/// while they show.
+/// place, the gear and the fold arrow, each as long as the plus, and after them the end grip: the
+/// pill is one `ADD` and one `STRETCH` longer while they show.
 pub const ADD: f64 = 38.0;
+/// The end grip after the two signs, which stretches the capsule: a strip as long as the handle at
+/// the pill's head, with the same bar, inside the pill. Nothing past the pill's end is part of it.
+pub const STRETCH: f64 = GRIP;
 /// Length of the pill of a folded capsule: one key, as far from the pill's ends as from its sides.
 pub const FOLDED: f64 = 60.0;
 
-/// Length of the pill for `n` items when nothing limits it: the handle, the items that show, the
-/// peek of the next one if there is one, and the foot with the plus.
-pub fn pill_height(n: usize, cell: f64) -> f64 {
-    let peek = if n > SHOWN { PEEK } else { 0.0 };
-    GRIP + n.min(SHOWN) as f64 * cell + peek + ADD + END
+/// The most the keys' part of the pill may take: the cells that show and the peek of the next item
+/// if there is one. Without a `length` (cells, from the settings) as many cells as there are items,
+/// up to `SHOWN`; with one, that many cells. Never more than the keys need (`pill_height`, `parts`):
+/// a capsule stretched past its keys shows no empty cells, and grows back to its length when the
+/// program in front brings more keys.
+pub fn keys_length(n: usize, cell: f64, length: Option<usize>) -> f64 {
+    let shown = length.map_or(n.min(SHOWN), |l| l.max(LEAST));
+    let peek = if n > shown { PEEK } else { 0.0 };
+    shown as f64 * cell + peek
 }
 
-/// Length of the pill along its edge, in CSS px: as long as `pill_height` says, one sign longer
-/// while the two signs show in the foot in place of the plus (`signs`), and no longer than fits in
-/// the work area. `work` is the work area `(x, y, width, height)` in physical px, `k` is physical
-/// px per CSS px. The page draws the pill this long and the window is sized for it, so neither
-/// waits for the other when the signs open or close.
-pub fn pill_length(work: (i32, i32, i32, i32), k: f64, cell: f64, n: usize, edge: Edge, signs: bool) -> f64 {
-    let more = if signs { ADD } else { 0.0 };
+/// Length of the pill for `n` items and no meters when nothing limits it: the handle, the keys'
+/// part (`keys_length`, no longer than the keys), and the foot with the plus.
+pub fn pill_height(n: usize, cell: f64, length: Option<usize>) -> f64 {
+    GRIP + keys_length(n, cell, length).min(n as f64 * cell) + ADD + END
+}
+
+/// The divider between the keys and the meters: a finger's target with a thin line in its middle.
+pub const LINE: f64 = 14.0;
+/// One meter's cell: a 32 px dial and its percent under it.
+pub const METER: f64 = 52.0;
+/// How many meters a stretched capsule keeps room for besides its cells; the rest scroll, unless the
+/// keys leave them room.
+pub const METERS_SHOWN: usize = 2;
+
+/// The most room the keys and the meters may share, the divider not counted. Without a `length`:
+/// the keys' part as it always was (`keys_length`) and every meter. With one: that many cells and the
+/// room of `METERS_SHOWN` meters with the peek of the next, as before the meters could grow; the
+/// meters then take of the keys' room what they need (`parts`).
+pub fn room_for(n: usize, m: usize, cell: f64, length: Option<usize>) -> f64 {
+    let keys = keys_length(n, cell, length);
+    match length {
+        None => keys + m as f64 * METER,
+        Some(_) => keys + m.min(METERS_SHOWN) as f64 * METER + if m > METERS_SHOWN { PEEK } else { 0.0 },
+    }
+}
+
+/// How `room` is shared between the keys' part and the meters' part, `(keys, meters)` in CSS px.
+/// Neither is ever longer than what it holds (`n` keys, `m` meters): what is left over goes, and the
+/// capsule is that much shorter, so it never shows empty cells. Each keeps one whole key or meter.
+/// `divider` is where the line was pulled to, as a share of `room`: the keys' part, which the meters
+/// follow with what is left of the room, up to all of them. Without it the meters take all they need
+/// while the keys keep up to `SHOWN` cells, and the keys get the rest. The page shares the room the
+/// same way while the line is pulled (`parts` in `ui/index.html`).
+pub fn parts(room: f64, n: usize, m: usize, cell: f64, divider: Option<f64>) -> (f64, f64) {
+    let (keys, meters) = (n as f64 * cell, m as f64 * METER);
+    let room = room.max(0.0);
+    if m == 0 {
+        return (keys.min(room), 0.0);
+    }
+    let (least, leave) = (keys.min(cell), meters.min(METER));
+    if least + leave > room {
+        // Too little room for one of each: they share it in their proportion
+        let k = room * least / (least + leave);
+        return (k, room - k);
+    }
+    let at = match divider {
+        Some(share) => (share * room).clamp(least, keys.min(room - leave)),
+        None => keys.min(room - meters.min((room - keys.min(SHOWN as f64 * cell)).max(leave))),
+    };
+    (at, meters.min(room - at))
+}
+
+/// The room the keys and the meters share in a pill: `room_for`, and no more than the work area
+/// leaves them beside the handle, the divider and the foot (see `pill_length`).
+pub fn room(work: (i32, i32, i32, i32), k: f64, cell: f64, n: usize, m: usize, edge: Edge, signs: bool, length: Option<usize>) -> f64 {
+    let (fixed, screen) = frame(work, k, m, edge, signs);
+    room_for(n, m, cell, length).min(screen - fixed).max(0.0)
+}
+
+/// What a pill has besides the keys and the meters, and the most the work area lets it be.
+fn frame(work: (i32, i32, i32, i32), k: f64, m: usize, edge: Edge, signs: bool) -> (f64, f64) {
+    let more = if signs { ADD + STRETCH } else { 0.0 };
     let span = if edge == Edge::Top { work.2 } else { work.3 };
-    let room = (span as f64 / k - 2.0 * ROOM - MARGIN).max(pill_height(0, cell) + more);
-    (pill_height(n, cell) + more).min(room)
+    let fixed = GRIP + ADD + END + more + if m > 0 { LINE } else { 0.0 };
+    (fixed, (span as f64 / k - 2.0 * ROOM - MARGIN).max(GRIP + ADD + END + more))
+}
+
+/// Length of the pill along its edge, in CSS px: the handle, the keys' and the meters' parts as
+/// `parts` shares `room` between them, the divider, and the foot, one sign and the end grip longer
+/// while the two signs show in place of the plus (`signs`); no longer than fits in the work area.
+/// `work` is the work area `(x, y, width, height)` in physical px, `k` is physical px per CSS px.
+/// The page draws the pill this long and the window is sized for it, so neither waits for the other
+/// when the signs open or close. `m` is the number of meters under the keys, `length` the cells the
+/// capsule was stretched to (`keys_length`), `divider` where the line between them was pulled to.
+pub fn pill_length(work: (i32, i32, i32, i32), k: f64, cell: f64, n: usize, m: usize, edge: Edge, signs: bool, length: Option<usize>, divider: Option<f64>) -> f64 {
+    let (fixed, screen) = frame(work, k, m, edge, signs);
+    let (keys, meters) = parts(room(work, k, cell, n, m, edge, signs, length), n, m, cell, divider);
+    (fixed + keys + meters).min(screen)
 }
 
 /// Where the capsule window goes, in physical px: `(x, y, width, height)`.
@@ -88,11 +165,12 @@ pub fn pill_length(work: (i32, i32, i32, i32), k: f64, cell: f64, n: usize, edge
 /// The pill is as long as `pill_length` says. Where that is more than fits between `along` and the
 /// end of the work area, the window is pulled back along the edge until the whole pill shows; only a
 /// pill longer than the work area itself is cut short, and then the list scrolls inside it.
-/// `signs` says that the two signs show in the foot in place of the plus.
-pub fn window_rect_with(work: (i32, i32, i32, i32), k: f64, along: f64, cell: f64, n: usize, edge: Edge, signs: bool) -> (i32, i32, i32, i32) {
+/// `signs` says that the two signs show in the foot in place of the plus; `m` is the number of meters,
+/// `length` the cells the capsule was stretched to, `divider` where the line was pulled to.
+pub fn window_rect_with(work: (i32, i32, i32, i32), k: f64, along: f64, cell: f64, n: usize, m: usize, edge: Edge, signs: bool, length: Option<usize>, divider: Option<f64>) -> (i32, i32, i32, i32) {
     let (wx, wy, ww, wh) = work;
     let along = if along.is_finite() { along.clamp(0.0, 1.0) } else { 0.0 };
-    let long = ((pill_length(work, k, cell, n, edge, signs) + 2.0 * ROOM) * k).round() as i32;
+    let long = ((pill_length(work, k, cell, n, m, edge, signs, length, divider) + 2.0 * ROOM) * k).round() as i32;
     if edge == Edge::Top {
         let height = ((WIDTH + CARD_ROOM_TOP) * k).round() as i32;
         let x = wx + (ww as f64 * along - ROOM * k).round() as i32;
@@ -107,7 +185,48 @@ pub fn window_rect_with(work: (i32, i32, i32, i32), k: f64, along: f64, cell: f6
 /// The window of a capsule at rest, with the plus in its foot: what the tests measure.
 #[cfg(test)]
 pub fn window_rect(work: (i32, i32, i32, i32), k: f64, along: f64, cell: f64, n: usize, edge: Edge) -> (i32, i32, i32, i32) {
-    window_rect_with(work, k, along, cell, n, edge, false)
+    window_rect_with(work, k, along, cell, n, 0, edge, false, None, None)
+}
+
+/// How far the end grip may stretch the capsule, and from where. The pill's start stays where it
+/// stands with the signs up, so the handle does not move under a stretch; from there the pill may
+/// grow by whole cells until, signs and all, it would pass the end of the work area, be cut short
+/// by `pill_length`, or show more than its keys and meters (`parts`): `most` is the fewest cells
+/// that pill takes, and never fewer than `LEAST`. Returns `(along, most)`: `along` is where the pill
+/// starts as a share of the work area, the `along` given unless the window stands pulled back
+/// against the end of the work area.
+pub fn reach(work: (i32, i32, i32, i32), k: f64, along: f64, cell: f64, n: usize, m: usize, edge: Edge, length: Option<usize>, divider: Option<f64>) -> (f64, usize) {
+    let window = window_rect_with(work, k, along, cell, n, m, edge, true, length, divider);
+    let (start, long, end, span) = if edge == Edge::Top {
+        (window.0, window.2, work.0 + work.2, work.2)
+    } else {
+        (window.1, window.3, work.1 + work.3, work.3)
+    };
+    let pill = |cells| pill_length(work, k, cell, n, m, edge, true, Some(cells), divider);
+    let fits = |cells| ((pill(cells) + 2.0 * ROOM) * k).round() as i32 <= end - start;
+    // A cell more than the work area is long can only be cut short
+    let bound = (span as f64 / k / cell) as usize + LEAST;
+    let mut most = LEAST;
+    while most < bound && fits(most + 1) {
+        most += 1;
+    }
+    while most > LEAST && pill(most - 1) >= pill(most) {
+        most -= 1;
+    }
+    let along = if start + long == end { along_from(work, k, window, edge) } else { along };
+    (along, most)
+}
+
+/// The window at `window` made `long` physical px along its edge from where it starts, no further
+/// than the end of the work area and never shorter than it was: the room the longest pill the divider
+/// can make needs while it is pulled, with the pill's start where it stands.
+pub fn held(window: (i32, i32, i32, i32), long: i32, work: (i32, i32, i32, i32), edge: Edge) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = window;
+    if edge == Edge::Top {
+        (x, y, long.min(work.0 + work.2 - x).max(w), h)
+    } else {
+        (x, y, w, long.min(work.1 + work.3 - y).max(h))
+    }
 }
 
 /// The window of a folded capsule, as a rectangle on the screen: the short pill with its one key
@@ -150,13 +269,14 @@ pub fn is_tap(carried: bool, moved: i32, k: f64) -> bool {
 }
 
 /// Where an open capsule whose window, with the two signs showing, is at `window` folds to: the
-/// cut-out whose key has its middle where the fold sign is, the last sign of the foot. It may
-/// reach past the work area; `along_from` makes the share of it and `folded_window` keeps it inside.
+/// cut-out whose key has its middle where the fold sign is, the last sign of the foot before the
+/// end grip. It may reach past the work area; `along_from` makes the share of it and
+/// `folded_window` keeps it inside.
 pub fn fold_spot(window: (i32, i32, i32, i32), k: f64, edge: Edge) -> (i32, i32, i32, i32) {
     let (x, y, w, h) = window;
     let (thick, long) = ((WIDTH * k).round() as i32, ((FOLDED + 2.0 * ROOM) * k).round() as i32);
-    // From the end of the window back to the sign's middle, and half the cut-out further
-    let back = ((ROOM + END + ADD / 2.0) * k).round() as i32 + long / 2;
+    // From the end of the window back past the end grip to the sign's middle, and half the cut-out further
+    let back = ((ROOM + END + STRETCH + ADD / 2.0) * k).round() as i32 + long / 2;
     match edge {
         Edge::Right => (x + w - thick, y + h - back, thick, long),
         Edge::Left => (x, y + h - back, thick, long),
@@ -197,6 +317,20 @@ pub fn grip_on_screen(window: (i32, i32, i32, i32), k: f64, edge: Edge) -> (i32,
         Edge::Left => (x, y, thick, long),
         Edge::Top => (x, y, long, thick),
     }
+}
+
+/// Where a window of `size` stands beside the pill at `pill`, all in physical px, as `(x, y,
+/// width, height)`: on the side away from the edge, `gap` from the pill, level with its start, and
+/// whole inside the work area; a window larger than the work area is cut to it.
+pub fn beside(pill: (i32, i32, i32, i32), size: (i32, i32), work: (i32, i32, i32, i32), gap: i32, edge: Edge) -> (i32, i32, i32, i32) {
+    let ((px, py, pw, ph), (wx, wy, ww, wh)) = (pill, work);
+    let (w, h) = (size.0.min(ww), size.1.min(wh));
+    let (x, y) = match edge {
+        Edge::Right => (px - gap - w, py),
+        Edge::Left => (px + pw + gap, py),
+        Edge::Top => (px, py + ph + gap),
+    };
+    (x.min(wx + ww - w).max(wx), y.min(wy + wh - h).max(wy), w, h)
 }
 
 /// The edge a capsule dropped with its strip at `at` (screen px) docks to. Close to the top of
@@ -315,14 +449,14 @@ mod tests {
                     for along in [0.0, 0.3, 0.62, 0.97, 1.0] {
                         let what = format!("{edge:?} scale {scale} along {along} {work:?} cell {cell}");
                         let work_end = span(work).1;
-                        // The two signs: the capsule is one sign longer, whole, and where it was
+                        // The two signs: the capsule is one sign and the end grip longer, whole, and where it was
                         // unless the end of the work area is in the way; there it is pulled back
                         // along the edge, not cut short
                         let rest = window_rect(work, k, along, cell, 6, edge);
-                        let open = window_rect_with(work, k, along, cell, 6, edge, true);
+                        let open = window_rect_with(work, k, along, cell, 6, 0, edge, true, None, None);
                         assert!(inside(open, work), "{what}: {open:?}");
                         let longer = (span(open).1 - span(open).0) - (span(rest).1 - span(rest).0);
-                        assert!((longer - (ADD * k).round() as i32).abs() <= 1, "{what}: longer by {longer}");
+                        assert!((longer - ((ADD + STRETCH) * k).round() as i32).abs() <= 1, "{what}: longer by {longer}");
                         assert!(span(open).0 == span(rest).0 || span(open).1 == work_end, "{what}: {rest:?} -> {open:?}");
                         // Folded: the key's middle is where the fold sign was, at the same edge
                         let at = along_from(work, k, fold_spot(open, k, edge), edge);
@@ -333,7 +467,7 @@ mod tests {
                             Edge::Left => assert_eq!(cut.0, work.0, "{what}"),
                             Edge::Top => assert_eq!(cut.1, work.1, "{what}"),
                         }
-                        let sign = span(open).1 - ((ROOM + END + ADD / 2.0) * k).round() as i32;
+                        let sign = span(open).1 - ((ROOM + END + STRETCH + ADD / 2.0) * k).round() as i32;
                         let middle = (span(cut).0 + span(cut).1) / 2;
                         assert!((middle - sign).abs() <= 2 || span(cut).1 == work_end, "{what}: key at {middle}, sign at {sign}");
                         // A carry saves the place the same way, and it reads back to the same place
@@ -359,15 +493,15 @@ mod tests {
             for edge in [Edge::Right, Edge::Left, Edge::Top] {
                 let span = |r: (i32, i32, i32, i32)| if edge == Edge::Top { (r.0, r.2) } else { (r.1, r.3) };
                 for (cell, n) in [(CELL, 3), (CELL, 8), (CELL * TABLET_STEP, 8)] {
-                    let rest = pill_length(work, k, cell, n, edge, false);
-                    let open = pill_length(work, k, cell, n, edge, true);
-                    // One sign longer, unless the work area has no room for it
-                    let fits = pill_height(n, cell) + ADD <= span(work).1 as f64 / k - 2.0 * ROOM - MARGIN;
-                    assert!((open - rest - ADD).abs() < 1e-9 || !fits, "{edge:?} {work:?} {k}: {rest} -> {open}");
+                    let rest = pill_length(work, k, cell, n, 0, edge, false, None, None);
+                    let open = pill_length(work, k, cell, n, 0, edge, true, None, None);
+                    // One sign and the end grip longer, unless the work area has no room for them
+                    let fits = pill_height(n, cell, None) + ADD + STRETCH <= span(work).1 as f64 / k - 2.0 * ROOM - MARGIN;
+                    assert!((open - rest - ADD - STRETCH).abs() < 1e-9 || !fits, "{edge:?} {work:?} {k}: {rest} -> {open}");
                     for along in [0.0, 0.3, 0.62, 0.97] {
                         let what = format!("{edge:?} {work:?} k {k} along {along} cell {cell} n {n}");
-                        let at_rest = window_rect_with(work, k, along, cell, n, edge, false);
-                        let with_signs = window_rect_with(work, k, along, cell, n, edge, true);
+                        let at_rest = window_rect_with(work, k, along, cell, n, 0, edge, false, None, None);
+                        let with_signs = window_rect_with(work, k, along, cell, n, 0, edge, true, None, None);
                         // The window is the pill the page draws and the room before and after it
                         assert_eq!(span(at_rest).1, ((rest + 2.0 * ROOM) * k).round() as i32, "{what}");
                         assert_eq!(span(with_signs).1, ((open + 2.0 * ROOM) * k).round() as i32, "{what}");
@@ -379,6 +513,258 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn meters_lengthen_the_pill_by_their_block_and_no_meters_change_nothing() {
+        let work = (0, 0, 2880, 1824);
+        for edge in [Edge::Right, Edge::Left, Edge::Top] {
+            for n in [0, 3, 8] {
+                let keys = pill_length(work, 2.0, CELL, n, 0, edge, false, None, None);
+                assert_eq!(keys, pill_height(n, CELL, None));
+                assert_eq!(pill_length(work, 2.0, CELL, n, 1, edge, false, None, None), keys + LINE + METER);
+                assert_eq!(pill_length(work, 2.0, CELL, n, 2, edge, true, None, None), keys + LINE + 2.0 * METER + ADD + STRETCH);
+                // Not stretched, the capsule shows every meter under its keys, as long as the screen lets it
+                assert_eq!(pill_length(work, 2.0, CELL, n, 3, edge, false, None, None), keys + LINE + 3.0 * METER);
+                assert_eq!(pill_length(work, 2.0, CELL, n, 9, edge, false, None, None), keys + LINE + 9.0 * METER);
+            }
+        }
+        // No meters: the window stands where it stood before them, worked out by hand at 200 %
+        // and 0.3 along. Its length is the pill (handle 44, the keys that show, the peek, the foot
+        // 38 + 3) and the room for the shadow at each end, 12; upright it is 78 + 270 wide, flat
+        // 78 + 96 high
+        for (n, long) in [(0, (44.0 + 41.0 + 24.0) * 2.0), (3, (44.0 + 3.0 * 54.0 + 41.0 + 24.0) * 2.0), (8, (44.0 + 4.0 * 54.0 + 18.0 + 41.0 + 24.0) * 2.0)] {
+            let long = long as i32;
+            assert_eq!(window_rect_with(work, 2.0, 0.3, CELL, n, 0, Edge::Right, false, None, None), (2880 - 696, 523, 696, long), "{n}");
+            assert_eq!(window_rect_with(work, 2.0, 0.3, CELL, n, 0, Edge::Left, false, None, None), (0, 523, 696, long), "{n}");
+            assert_eq!(window_rect_with(work, 2.0, 0.3, CELL, n, 0, Edge::Top, false, None, None), (840, 0, long, 348), "{n}");
+        }
+        // A screen too short for them all: the pill fits the work area, the lists scroll inside it
+        let low = (0, 0, 640, 500);
+        assert_eq!(pill_length(low, 2.0, CELL, 8, 5, Edge::Right, false, None, None), 250.0 - 2.0 * ROOM - MARGIN);
+    }
+
+    #[test]
+    fn a_stretched_capsule_has_its_cells_whatever_the_keys_and_none_is_as_before() {
+        // No length: up to four keys, the peek of the fifth, as it always was
+        for n in [0, 1, 3, 4, 5, 12] {
+            assert_eq!(keys_length(n, CELL, None), n.min(SHOWN) as f64 * CELL + if n > SHOWN { PEEK } else { 0.0 }, "{n}");
+        }
+        // A length: that many cells with few keys too, the peek only with more keys than cells
+        assert_eq!(keys_length(3, CELL, Some(6)), 6.0 * CELL);
+        assert_eq!(keys_length(6, CELL, Some(6)), 6.0 * CELL);
+        assert_eq!(keys_length(8, CELL, Some(6)), 6.0 * CELL + PEEK);
+        assert!((keys_length(8, CELL * TABLET_STEP, Some(3)) - (3.0 * CELL * TABLET_STEP + PEEK)).abs() < 1e-9);
+        // Never fewer than two cells, whatever the file says
+        assert_eq!(keys_length(5, CELL, Some(0)), keys_length(5, CELL, Some(LEAST)));
+        assert_eq!(keys_length(5, CELL, Some(1)), 2.0 * CELL + PEEK);
+    }
+
+    #[test]
+    fn the_window_of_a_stretched_capsule_is_its_pill_inside_the_work_area() {
+        // A tablet at 200 %, lying and standing, a screen too short, the three sizes of the panel
+        let works = [(0, 0, 2880, 1824), (0, 40, 1920, 2744), (0, 0, 1600, 560)];
+        for scale in [0.8, 1.0, 1.25] {
+            let k = 2.0 * scale;
+            for work in works {
+                let (wx, wy, ww, wh) = work;
+                for edge in [Edge::Right, Edge::Left, Edge::Top] {
+                    let span = |r: (i32, i32, i32, i32)| if edge == Edge::Top { r.2 } else { r.3 };
+                    for cell in [CELL, CELL * TABLET_STEP] {
+                        for (n, m) in [(3, 0), (9, 0), (9, 3)] {
+                            for length in [Some(2), Some(5), Some(9), Some(40)] {
+                                for along in [0.0, 0.3, 0.97] {
+                                    for signs in [false, true] {
+                                        let what = format!("{edge:?} {work:?} k {k} cell {cell} n {n} m {m} {length:?} along {along} signs {signs}");
+                                        let window = window_rect_with(work, k, along, cell, n, m, edge, signs, length, None);
+                                        let (x, y, w, h) = window;
+                                        assert!(x >= wx && y >= wy && x + w <= wx + ww && y + h <= wy + wh, "{what}: {window:?}");
+                                        // The window is the pill the page draws and the room before and after it
+                                        let pill = pill_length(work, k, cell, n, m, edge, signs, length, None);
+                                        assert_eq!(span(window), ((pill + 2.0 * ROOM) * k).round() as i32, "{what}");
+                                        let (px, py, pw, _) = pill_on_screen(window, k, edge);
+                                        match edge {
+                                            Edge::Right => assert_eq!(px + pw, wx + ww, "{what}"),
+                                            Edge::Left => assert_eq!(px, wx, "{what}"),
+                                            Edge::Top => assert_eq!(py, wy, "{what}"),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // As long as asked when it fits and there are keys for it: a handle, five cells, the foot,
+        // worked out by hand; with three keys only three cells, and no empty ones
+        assert_eq!(pill_length(WORK, 2.0, CELL, 7, 0, Edge::Right, false, Some(5), None), GRIP + 5.0 * CELL + PEEK + ADD + END);
+        assert_eq!(pill_length(WORK, 2.0, CELL, 5, 0, Edge::Right, true, Some(5), None), GRIP + 5.0 * CELL + 2.0 * ADD + STRETCH + END);
+        assert_eq!(pill_length(WORK, 2.0, CELL, 3, 0, Edge::Right, false, Some(5), None), GRIP + 3.0 * CELL + ADD + END);
+    }
+
+    #[test]
+    fn the_end_grip_stretches_from_two_cells_to_what_fits_and_the_handle_stays() {
+        let works = [(0, 0, 2880, 1824), (0, 40, 1920, 2744), (0, 0, 640, 560)];
+        for scale in [0.8, 1.0, 1.25] {
+            let k = 2.0 * scale;
+            for work in works {
+                for edge in [Edge::Right, Edge::Left, Edge::Top] {
+                    let span = |r: (i32, i32, i32, i32)| if edge == Edge::Top { (r.0, r.0 + r.2) } else { (r.1, r.1 + r.3) };
+                    let work_end = span(work).1;
+                    for cell in [CELL, CELL * TABLET_STEP] {
+                        for (n, m) in [(3, 0), (9, 2)] {
+                            for length in [None, Some(2), Some(7)] {
+                                for along in [0.0, 0.3, 0.62, 0.97] {
+                                    let what = format!("{edge:?} {work:?} k {k} cell {cell} n {n} m {m} {length:?} along {along}");
+                                    let (at, most) = reach(work, k, along, cell, n, m, edge, length, None);
+                                    assert!(most >= LEAST, "{what}");
+                                    // Where the pill stands with the signs up before the stretch
+                                    let before = span(window_rect_with(work, k, along, cell, n, m, edge, true, length, None));
+                                    for cells in LEAST..=most {
+                                        let now = span(window_rect_with(work, k, at, cell, n, m, edge, true, Some(cells), None));
+                                        // The handle does not move, and the whole pill shows
+                                        assert_eq!(now.0, before.0, "{what}: {cells} cells");
+                                        assert!(now.1 <= work_end, "{what}: {cells} cells");
+                                        // Nor when the signs go after the release
+                                        let rest = span(window_rect_with(work, k, at, cell, n, m, edge, false, Some(cells), None));
+                                        assert_eq!(rest.0, before.0, "{what}: {cells} cells at rest");
+                                    }
+                                    // One cell more would run past the work area, or show nothing more:
+                                    // the keys and meters all show, or the pill is cut short
+                                    let longest = pill_length(work, k, cell, n, m, edge, true, Some(most), None);
+                                    let longer = pill_length(work, k, cell, n, m, edge, true, Some(most + 1), None);
+                                    assert!(longer <= longest || before.0 + ((longer + 2.0 * ROOM) * k).round() as i32 > work_end, "{what}: {most}");
+                                    // ...and the fewest cells give that pill
+                                    assert!(most == LEAST || pill_length(work, k, cell, n, m, edge, true, Some(most - 1), None) < longest, "{what}: {most}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Not pulled back: the place is the one given; at the end of the screen it is where it stands
+        assert_eq!(reach(WORK, 2.0, 0.3, CELL, 3, 0, Edge::Right, None, None).0, 0.3);
+        let (at, most) = reach(WORK, 2.0, 0.97, CELL, 3, 0, Edge::Right, None, None);
+        assert!(at < 0.97 && most == 3, "{at} {most}");
+        // High on a tall screen there is room for many cells, as many as there are keys; a short
+        // screen still has two
+        assert!(reach(WORK, 2.0, 0.0, CELL, 20, 0, Edge::Right, None, None).1 >= 12);
+        assert_eq!(reach(WORK, 2.0, 0.0, CELL, 5, 0, Edge::Right, None, None).1, 5);
+        assert_eq!(reach((0, 0, 640, 400), 2.0, 0.0, CELL, 3, 0, Edge::Right, None, None).1, LEAST);
+    }
+
+    #[test]
+    fn a_capsule_longer_than_its_keys_and_meters_shows_no_empty_cells() {
+        // Stretched to eight cells with three keys, with and without meters: the pill is the
+        // handle, the keys, the divider, every meter and the foot, nothing more
+        for m in [0, 1, 3] {
+            for divider in [None, Some(0.5)] {
+                let pill = pill_length(WORK, 2.0, CELL, 3, m, Edge::Right, false, Some(8), divider);
+                let line = if m > 0 { LINE } else { 0.0 };
+                assert_eq!(pill, GRIP + 3.0 * CELL + line + m as f64 * METER + ADD + END, "{m} {divider:?}");
+                let window = window_rect_with(WORK, 2.0, 0.3, CELL, 3, m, Edge::Right, false, Some(8), divider);
+                assert_eq!(window.3, ((pill + 2.0 * ROOM) * 2.0).round() as i32, "{m} {divider:?}");
+            }
+        }
+        // Whatever the room and the line, neither part is longer than what it holds, each keeps one
+        // whole key or meter when there is room for both, and together they fit the room
+        for room in [0.0, 50.0, 106.0, 200.0, 572.0, 2000.0] {
+            for (n, m) in [(0, 2), (1, 1), (2, 5), (10, 3), (10, 10)] {
+                for divider in [None, Some(0.0), Some(0.05), Some(0.4), Some(0.95), Some(1.0)] {
+                    let what = format!("room {room} n {n} m {m} {divider:?}");
+                    let (keys, meters) = parts(room, n, m, CELL, divider);
+                    assert!(keys <= n as f64 * CELL + 1e-9 && meters <= m as f64 * METER + 1e-9, "{what}: {keys} {meters}");
+                    assert!(keys + meters <= room + 1e-9, "{what}: {keys} {meters}");
+                    if room >= CELL + METER {
+                        assert!(keys >= (n as f64 * CELL).min(CELL) && meters >= METER, "{what}: {keys} {meters}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_meters_grow_to_show_all_and_the_keys_get_the_rest() {
+        // Stretched to eight cells, ten keys, three meters: the room of eight cells, the peek and two
+        // meters with the next one's peek; all three meters show, the keys scroll in the rest
+        let room = room_for(10, 3, CELL, Some(8));
+        assert_eq!(room, 8.0 * CELL + PEEK + 2.0 * METER + PEEK);
+        assert_eq!(parts(room, 10, 3, CELL, None), (room - 3.0 * METER, 3.0 * METER));
+        // A pill of the same length as before the meters could grow
+        let pill = pill_length(WORK, 2.0, CELL, 10, 3, Edge::Right, false, Some(8), None);
+        assert_eq!(pill, GRIP + room + LINE + ADD + END);
+        // Many meters in a short capsule: the keys keep up to four cells, the meters scroll in the rest
+        let short = room_for(10, 10, CELL, Some(5));
+        assert_eq!(parts(short, 10, 10, CELL, None), (4.0 * CELL, short - 4.0 * CELL));
+        // Not stretched: up to four keys and every meter
+        assert_eq!(parts(room_for(6, 8, CELL, None), 6, 8, CELL, None), (4.0 * CELL + PEEK, 8.0 * METER));
+        // A screen too short for everything: the room is what it leaves, shared the same way
+        let low = (0, 0, 640, 700);
+        let tight = super::room(low, 2.0, CELL, 10, 3, Edge::Right, false, Some(8));
+        assert_eq!(tight, 350.0 - 2.0 * ROOM - MARGIN - (GRIP + LINE + ADD + END));
+        assert_eq!(pill_length(low, 2.0, CELL, 10, 3, Edge::Right, false, Some(8), None), 350.0 - 2.0 * ROOM - MARGIN);
+    }
+
+    #[test]
+    fn the_divider_never_leaves_room_empty_below_the_meters_or_among_the_keys() {
+        let room = room_for(10, 3, CELL, Some(8));
+        // Pulled down: the keys grow, the meters shrink and scroll, the pill keeps its length
+        let (keys, meters) = parts(room, 10, 3, CELL, Some(0.8));
+        assert_eq!((keys, meters), (0.8 * room, room - 0.8 * room));
+        assert!(meters < 3.0 * METER);
+        // ...but one meter always shows
+        assert_eq!(parts(room, 10, 3, CELL, Some(1.0)), (room - METER, METER));
+        // Pulled up: the meters stop at all three, and what is left over goes: a shorter pill
+        let (keys, meters) = parts(room, 10, 3, CELL, Some(0.2));
+        assert_eq!((keys, meters), (0.2 * room, 3.0 * METER));
+        let short = pill_length(WORK, 2.0, CELL, 10, 3, Edge::Right, false, Some(8), Some(0.2));
+        assert!((short - (GRIP + 0.2 * room + LINE + 3.0 * METER + ADD + END)).abs() < 1e-9, "{short}");
+        // ...and one key always shows
+        assert_eq!(parts(room, 10, 3, CELL, Some(0.0)).0, CELL);
+        // Two keys: the line stops under them however far it is pulled down, and the meters shrink
+        let (keys, meters) = parts(room, 2, 5, CELL, Some(0.9));
+        assert_eq!((keys, meters), (2.0 * CELL, (5.0 * METER).min(room - 2.0 * CELL)));
+        // The further down the line, the longer the keys' part and the pill, never shorter
+        let mut last = (0.0, 0.0);
+        for step in 0..=20 {
+            let (keys, meters) = parts(room, 10, 3, CELL, Some(step as f64 / 20.0));
+            assert!(keys >= last.0 && keys + meters >= last.0 + last.1 - 1e-9, "{step}");
+            last = (keys, meters);
+        }
+        // The line changes the window with the pill, and the end grip's steps with it
+        let window = |divider| window_rect_with(WORK, 2.0, 0.3, CELL, 10, 3, Edge::Right, false, Some(8), divider).3;
+        assert!(window(Some(0.2)) < window(None));
+        assert_eq!(window(Some(0.2)), ((short + 2.0 * ROOM) * 2.0).round() as i32);
+    }
+
+    #[test]
+    fn a_pulled_divider_has_room_for_the_longest_pill_it_can_make_with_the_start_held() {
+        // Six cells, ten keys, one meter, the line pulled up to the top: a short pill. Pulled down it
+        // may be as long as with no divider at all; the window held for the pull has room for that
+        for edge in [Edge::Right, Edge::Left, Edge::Top] {
+            for along in [0.0, 0.3, 0.9] {
+                let what = format!("{edge:?} {along}");
+                let span = |r: (i32, i32, i32, i32)| if edge == Edge::Top { (r.0, r.2) } else { (r.1, r.3) };
+                let short = window_rect_with(WORK, 2.0, along, CELL, 10, 1, edge, false, Some(6), Some(0.0));
+                let longest = window_rect_with(WORK, 2.0, along, CELL, 10, 1, edge, false, Some(6), None);
+                for share in [0.0, 0.3, 0.7, 1.0] {
+                    let pill = pill_length(WORK, 2.0, CELL, 10, 1, edge, false, Some(6), Some(share));
+                    assert!(pill <= pill_length(WORK, 2.0, CELL, 10, 1, edge, false, Some(6), None) + 1e-9, "{what} {share}");
+                }
+                let held = held(short, span(longest).1, WORK, edge);
+                // The start stays, the window is inside the work area and no shorter than it was
+                assert_eq!(span(held).0, span(short).0, "{what}");
+                let end = if edge == Edge::Top { WORK.0 + WORK.2 } else { WORK.1 + WORK.3 };
+                assert!(span(held).0 + span(held).1 <= end && span(held).1 >= span(short).1, "{what}");
+                // Where the work area lets it, as long as the longest pill
+                assert!(span(held).1 == span(longest).1 || span(held).0 + span(held).1 == end, "{what}");
+                assert!(span(short).1 < span(longest).1, "{what}");
+            }
+        }
+        // Never shorter than the window it holds
+        assert_eq!(held((0, 100, 156, 600), 400, WORK, Edge::Right), (0, 100, 156, 600));
     }
 
     #[test]
@@ -420,6 +806,24 @@ mod tests {
         assert!(is_tap(true, 16, 2.0));
         assert!(!is_tap(true, 17, 2.0));
         assert!(is_tap(true, 8, 1.0) && !is_tap(true, 9, 1.0));
+    }
+
+    #[test]
+    fn a_window_beside_the_pill_stands_away_from_the_edge_and_whole_on_the_screen() {
+        let size = (800, 880);
+        // Upright at the right and left edges: beside the pill, level with its top
+        assert_eq!(beside((2760, 547, 120, 600), size, WORK, 16, Edge::Right), (2760 - 16 - 800, 547, 800, 880));
+        assert_eq!(beside((0, 547, 120, 600), size, WORK, 16, Edge::Left), (136, 547, 800, 880));
+        // Low on the screen: pulled up until it ends with the work area
+        assert_eq!(beside((2760, 1400, 120, 400), size, WORK, 16, Edge::Right), (1944, 1824 - 880, 800, 880));
+        // Flat at the top: under the pill, from its left end, pulled back from the right end
+        assert_eq!(beside((840, 0, 600, 120), size, WORK, 16, Edge::Top), (840, 136, 800, 880));
+        assert_eq!(beside((2400, 0, 400, 120), size, WORK, 16, Edge::Top), (2880 - 800, 136, 800, 880));
+        // Taller than a short work area, at a high scale: as tall as the work area, from its top
+        let short = (0, 40, 1280, 600);
+        assert_eq!(beside((1160, 200, 120, 300), (840, 920), short, 24, Edge::Right), (1160 - 24 - 840, 40, 840, 600));
+        // Wider than the work area too: as wide as it
+        assert_eq!(beside((0, 200, 120, 300), (1400, 400), short, 24, Edge::Left), (0, 200, 1280, 400));
     }
 
     #[test]

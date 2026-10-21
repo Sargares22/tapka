@@ -12,11 +12,13 @@
     --pill:#0e0f12;--key:#1c1d22;--key-hot:#2a2c33;--label:#17181c;
     --ink:#fff;--ink-2:#e6e8ee;--ink-dim:#8b8f9a;--accent:#8ab4ff;
     --rim:inset 0 0 0 1px rgba(255,255,255,.10);--bar:rgba(255,255,255,.28);--bar-hot:rgba(255,255,255,.55);
+    --track:rgba(255,255,255,.08);--warn:#ffb340;
   }
   :root[data-theme=light]{
     --pill:#eef0f4;--key:#fff;--key-hot:#dfe3ea;--label:#fff;
     --ink:#15171c;--ink-2:#2a2d34;--ink-dim:#676c78;
     --rim:inset 0 0 0 1px rgba(0,0,0,.12);--bar:rgba(0,0,0,.28);--bar-hot:rgba(0,0,0,.55);
+    --track:rgba(0,0,0,.08);--warn:#c46a00;
   }
   *{box-sizing:border-box}
   html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent;user-select:none}
@@ -40,7 +42,7 @@
   #grip.hot::after{width:30px;background:var(--bar-hot)}
   /* The keys: the list of items, which scrolls, and after it the key that opens the editor */
   #keys{flex:1 1 auto;min-width:0;min-height:0;padding-bottom:3px;display:flex;flex-direction:column;touch-action:none}
-  #list{
+  #list,#meters{
     flex:1 1 auto;min-width:0;min-height:0;
     display:flex;flex-direction:column;align-items:stretch;
     overflow-y:auto;scrollbar-width:none;touch-action:none;overscroll-behavior:contain;
@@ -48,8 +50,8 @@
     mask-image:linear-gradient(to bottom,transparent,#000 var(--before),#000 calc(100% - var(--after)),transparent);
   }
   /* More items past an end of the list: that end fades out */
-  #list.more-before{--before:26px}
-  #list.more-after{--after:26px}
+  #list.more-before,#meters.more-before{--before:26px}
+  #list.more-after,#meters.more-after{--after:26px}
   /* An item is a cell as wide as the pill, so there is no dead space between keys; the key is
      what is drawn. --cell is the step from key to key, wider without a keyboard. */
   .item{
@@ -69,10 +71,19 @@
      holds is down (Shift for the pen): the key itself is lit */
   .item.live .key,.item.held .key{background:color-mix(in srgb,var(--accent) 24%,var(--key));box-shadow:inset 0 0 0 1.5px var(--accent)}
   .item.hot .key{background:var(--key-hot)}
+  /* The program this item opens is gone and was not found elsewhere: the key is grey */
+  .item.lost .key{opacity:.45;filter:grayscale(1)}
   .item.down .key{transform:scale(.92);background:var(--key-hot)}
   /* A tap that ran its action: for a moment the key dips as if held and takes a little of the
      accent, fainter than a lit key */
   .item.flash .key{transform:scale(.92);background:color-mix(in srgb,var(--accent) 28%,var(--key-hot));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
+  /* The key of a program that has a meter: the meter runs along the key's rim from its top */
+  .key{position:relative}
+  .key svg.ring{position:absolute;inset:0;width:46px;height:46px}
+  .ring path{fill:none;stroke-width:2.6px}
+  .ring .track,.dial .track{stroke:var(--track)}
+  .ring .arc,.dial .arc{stroke:var(--accent);transition:stroke-dasharray .3s}
+  .ring.warn .arc,.dial.warn .arc{stroke:var(--warn)}
   .key img{display:block;width:24px;height:24px;object-fit:contain;pointer-events:none}
   .key svg{display:block;width:24px;height:24px;pointer-events:none}
   /* A picture that would not read on its key: of one colour, it is drawn in the ink of the theme;
@@ -90,10 +101,50 @@
   .item.add .key{width:46px;height:30px;border-radius:11px;background:none;color:var(--ink-dim)}
   .item.add .key svg{width:20px;height:20px}
   .item.add.hot .key,.item.add.down .key{background:var(--key);color:var(--ink-2)}
+  /* The end grip, the third sign, after the gear and the arrow: the handle's strip and bar again,
+     as the last part of the pill, the bar as far from the pill's end as the handle's from its
+     start. Nothing past the pill's end is part of it: a press there belongs to what is behind. */
+  #stretch{position:relative;flex:0 0 44px;touch-action:none}
+  #stretch::after{
+    content:"";position:absolute;left:50%;bottom:17px;width:26px;height:5px;border-radius:3px;
+    transform:translateX(-50%);background:var(--bar);transition:width .15s,background .15s;
+  }
+  #stretch.hot::after{width:30px;background:var(--bar-hot)}
+  #stretch.pulled::after{width:34px;background:var(--accent)}
+  /* The meters, under the keys behind a thin line. The line is pulled to share the room between
+     the keys and the meters; each list scrolls in its own part. A meter is a small rounded square
+     of the keys' look, its value along its outline from the middle of its top, with its program's
+     icon and the percent under it; with nothing found it is empty and grey. A file's second number
+     is a thin second outline just outside the square, in the room the cell already has: the
+     square stands at the top of its cell so that outline stays inside it. */
+  #divider{position:relative;flex:0 0 14px;touch-action:none}
+  #divider::after{content:"";position:absolute;left:14px;right:14px;top:6.5px;height:1px;background:var(--bar);transition:background .15s,left .15s,right .15s}
+  #divider.hot::after,#divider.pulled::after{left:10px;right:10px;background:var(--accent)}
+  .meter{
+    flex:0 0 52px;width:100%;border:none;padding:0;background:none;color:inherit;font:inherit;
+    display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;padding-top:2.5px;
+  }
+  .dial{position:relative;width:34px;height:34px;border-radius:10px;background:var(--key);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--ink-2);transition:background .15s,transform .12s ease-out}
+  .dial svg{position:absolute;inset:0;width:34px;height:34px;pointer-events:none}
+  .dial path{fill:none;stroke-width:3px}
+  .dial img{display:block;width:16px;height:16px;object-fit:contain;pointer-events:none}
+  .dial svg.outer{display:none;inset:-2.5px;width:39px;height:39px}
+  .dial .outer path{stroke-width:1.5px}
+  .dial .outer .arc{stroke:color-mix(in srgb,var(--accent) 60%,transparent)}
+  .dial .outer.warn .arc{stroke:color-mix(in srgb,var(--warn) 70%,transparent)}
+  .meter.ringed .dial svg.outer{display:block}
+  .pct{font-size:10.5px;line-height:12px;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+  .meter.none .dial>img,.meter.none .dial>span{opacity:.45;filter:grayscale(1)}
+  /* A file not updated for longer than it allows: grey, keeping its last percent */
+  .meter.stale .dial .arc{stroke:var(--ink-dim)}
+  .meter.stale .dial .outer .arc{stroke:color-mix(in srgb,var(--ink-dim) 60%,transparent)}
+  .meter.stale .dial>img,.meter.stale .dial>span{opacity:.45;filter:grayscale(1)}
+  .meter.hot .dial{background:var(--key-hot)}
+  .meter.down .dial{transform:scale(.92);background:var(--key-hot)}
   /* Carried by the handle: lifted, lit by the accent, keys dimmed */
   body.dragging #pill{border-radius:22px;transform:translateX(-8px) scale(1.03);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 70%,transparent),0 6px 12px rgba(0,0,0,.5)}
   body.dragging #grip::after{width:34px;background:var(--accent)}
-  body.dragging .key{opacity:.6}
+  body.dragging .key,body.dragging .meter{opacity:.6}
   /* The name label, on the inner side of the pill, level with its key */
   #card{
     position:absolute;right:70px;transform:translateY(-50%);max-width:260px;
@@ -105,6 +156,8 @@
   .c-title{font-size:13px;font-weight:600}
   .c-sub{font-size:11px;color:var(--ink-dim);margin-top:2px}
   .c-sub:empty{display:none}
+  .c-hint{font-size:10.5px;line-height:14px;color:var(--ink-dim);opacity:.85;margin-top:4px}
+  .c-hint:empty{display:none}
   /* At the left edge the strip and the label change sides; nothing else is mirrored */
   body[data-edge="left"] #pill{right:auto;left:0;border-radius:0 22px 22px 0}
   body[data-edge="left"] #card{right:auto;left:70px}
@@ -120,7 +173,14 @@
   body[data-edge="top"] #keys{flex-direction:row;padding:0 3px 0 0}
   body[data-edge="top"] #list{flex-direction:row;overflow-x:auto;overflow-y:hidden;mask-image:linear-gradient(to right,transparent,#000 var(--before),#000 calc(100% - var(--after)),transparent)}
   body[data-edge="top"] .item{width:auto;height:100%}
+  body[data-edge="top"] #meters{flex-direction:row;overflow-x:auto;overflow-y:hidden;mask-image:linear-gradient(to right,transparent,#000 var(--before),#000 calc(100% - var(--after)),transparent)}
+  body[data-edge="top"] .meter{width:auto;height:100%;justify-content:center;padding-top:0}
+  body[data-edge="top"] #divider::after{left:6.5px;right:auto;top:14px;bottom:14px;width:1px;height:auto;transition:background .15s,top .15s,bottom .15s}
+  body[data-edge="top"] #divider.hot::after,body[data-edge="top"] #divider.pulled::after{left:6.5px;right:auto;top:10px;bottom:10px}
   body[data-edge="top"] .item.add .key{width:30px;height:46px}
+  body[data-edge="top"] #stretch::after{left:auto;right:17px;bottom:auto;top:50%;width:5px;height:26px;transform:translateY(-50%);transition:height .15s,background .15s}
+  body[data-edge="top"] #stretch.hot::after{width:5px;height:30px}
+  body[data-edge="top"] #stretch.pulled::after{width:5px;height:34px}
   body[data-edge="top"] .item.on::after{right:auto;left:50%;top:1.5px;width:14px;height:3px;transform:translateX(-50%)}
   body[data-edge="top"] #card{right:auto;top:70px;transform:translateX(-50%)}
   body[data-edge="top"].dragging #pill{border-radius:22px;transform:translateY(8px) scale(1.03)}
@@ -136,24 +196,54 @@
   .item.unfold{flex:1 1 auto}
   .item.unfold .key{background:color-mix(in srgb,var(--accent) 24%,var(--key));box-shadow:inset 0 0 0 1.5px var(--accent);color:var(--ink)}
   .item.unfold.hot .key,.item.unfold.down .key{background:color-mix(in srgb,var(--accent) 36%,var(--key))}
-  @media (prefers-reduced-motion: reduce){#pill,.key,#grip::after{transition:none}}
+  @media (prefers-reduced-motion: reduce){#pill,.key,#grip::after,#stretch::after,.dial,.arc{transition:none}}
 </style>
 </head>
 <body>
-  <div id="card" hidden><div class="c-title"></div><div class="c-sub"></div></div>
+  <div id="card" hidden><div class="c-title"></div><div class="c-sub"></div><div class="c-hint"></div></div>
   <div id="pill"><div id="grip"></div><div id="keys"><div id="list"></div></div></div>
 <script>
+  // The browser's own menu (Back, Refresh, Print) and its reload and print keys are no part of the
+  // panel: a reload in the middle of a card loses it
+  addEventListener('contextmenu', e => e.preventDefault());
+  addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if (k === 'f5' || ((e.ctrlKey || e.metaKey) && (k === 'r' || k === 'p'))) e.preventDefault();
+  });
   const list = document.getElementById('list');
   const keys = document.getElementById('keys');
   const grip = document.getElementById('grip');
   const card = document.getElementById('card');
   const pill = document.getElementById('pill');
+  // The meters and the line before them are part of the keys' strip only while there are meters
+  const divider = Object.assign(document.createElement('div'), { id: 'divider' });
+  const gauges = Object.assign(document.createElement('div'), { id: 'meters' });
+  // The end grip is in the foot only while the signs are
+  const tail = Object.assign(document.createElement('div'), { id: 'stretch' });
   const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
   const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8, EDGE = 22, EDGE_STEP = 6, NOTE_MS = 2000, FAILED_MS = 2500, APPEAR_MS = 180, FLASH_MS = 140, SIGNS_MS = 4000, PEEK = 18;
+  // The pill's parts as layout.rs has them (GRIP, ADD, END, STRETCH, LINE, METER, SHOWN); above
+  // WARN a meter takes the warning colour
+  const GRIP = 44, ADD = 38, END = 3, STRETCH = 44, LINE = 14, METER = 52, SHOWN = 4, WARN = 80;
+  // The meters as Rust sent them, with their values, and the generation of those values; the
+  // share of the room the keys take, as the line stands now and as the settings have it
+  let meters = [], generation = null, split = null, saved = null, cell = 54, count = 0;
+  // The cells the capsule was stretched to, or null for as many as its keys, up to four; what
+  // the end grip may stretch it to: `[cells, length of the pill with the signs, room of its keys and
+  // meters]`, as Rust sent them; and the room the keys and the meters share, with the plus and with
+  // the signs (`layout::room`)
+  let length = null, reach = [], room = null;
+  // What the label of a meter with nothing found says in place of its percent
+  let noData = '—';
+  // The keys without a meter whose program shows progress on its taskbar button: the percent, by
+  // the item's place in the settings file; and the age of the list of items those places are of
+  let rims = new Map(), age = null;
   let shown = [];
   // The capsule is folded into one key
   let folded = false;
   let tablet = false;
+  // What the label of a grey key says under its name
+  let lostWords = '';
   // A quiet click on a tap, if the settings ask for it
   let sound = false;
   // The active program changed which items show: the next drawing brings the new keys in softly.
@@ -206,7 +296,7 @@
   function button(i) {
     const it = shown[i];
     const b = document.createElement('button');
-    b.className = 'item' + (it.on ? ' on' : '') + (it.live ? ' live' : '') + (it.held ? ' held' : '') + (it.add ? ' add' : '') + (it.unfold ? ' unfold' : '');
+    b.className = 'item' + (it.on ? ' on' : '') + (it.live ? ' live' : '') + (it.held ? ' held' : '') + (it.lost ? ' lost' : '') + (it.add ? ' add' : '') + (it.unfold ? ' unfold' : '');
     b.dataset.i = i;
     const key = document.createElement('span');
     key.className = 'key';
@@ -222,14 +312,108 @@
     } else {
       key.textContent = [...it.name][0].toUpperCase();
     }
+    if (it.ring != null) ringOn(key);
     b.append(key);
     return b;
   }
+  const ringOn = key => key.insertAdjacentHTML('beforeend', `<svg class="ring" viewBox="0 0 46 46"><path class="track" d="${RIM}"/><path class="arc" d="${RIM}" pathLength="100"/></svg>`);
+  // The key's rim, 46 px with 14 px corners, inside the stroke, from the middle of its top round
+  const RIM = 'M23 1.3H32A12.7 12.7 0 0 1 44.7 14V32A12.7 12.7 0 0 1 32 44.7H14A12.7 12.7 0 0 1 1.3 32V14A12.7 12.7 0 0 1 14 1.3Z';
+
+  // A meter's square, 34 px with 10 px corners, and the second outline 1 px outside it, each inside
+  // its stroke and from the middle of its top round, as the key's rim
+  const SQUARE = 'M17 1.5H24A8.5 8.5 0 0 1 32.5 10V24A8.5 8.5 0 0 1 24 32.5H10A8.5 8.5 0 0 1 1.5 24V10A8.5 8.5 0 0 1 10 1.5Z';
+  const OUTER = 'M19.5 .75H26.5A11.75 11.75 0 0 1 38.25 12.5V26.5A11.75 11.75 0 0 1 26.5 38.25H12.5A11.75 11.75 0 0 1 .75 26.5V12.5A11.75 11.75 0 0 1 12.5 .75Z';
+  // A meter: its square with the program's icon, or the first letter of its name, and the percent.
+  // The second outline comes after the square's own: fill() takes the first arc it finds
+  function gauge(i) {
+    const m = meters[i];
+    const b = document.createElement('button');
+    b.className = 'meter';
+    b.dataset.m = i;
+    const dial = document.createElement('span');
+    dial.className = 'dial';
+    dial.innerHTML = `<svg viewBox="0 0 34 34"><path class="track" d="${SQUARE}"/><path class="arc" d="${SQUARE}" pathLength="100"/></svg>`
+      + `<svg class="outer" viewBox="0 0 39 39"><path class="track" d="${OUTER}"/><path class="arc" d="${OUTER}" pathLength="100"/></svg>`;
+    if (m.icon) {
+      const img = document.createElement('img');
+      img.src = m.icon;
+      img.alt = m.name;
+      dial.append(img);
+    } else {
+      dial.append(Object.assign(document.createElement('span'), { textContent: [...m.name][0].toUpperCase() }));
+    }
+    b.append(dial, Object.assign(document.createElement('span'), { className: 'pct' }));
+    return b;
+  }
+  const percent = v => v == null ? '—' : v + '%';
+  // The values go on the dials and on the rims of the keys whose program has a meter
+  function fill(svg, v) {
+    svg.classList.toggle('warn', v != null && v > WARN);
+    svg.querySelector('.arc').style.strokeDasharray = `${v ?? 0} 100`;
+  }
+  function paintMeters() {
+    for (const b of gauges.children) {
+      // A late value may come for meters a folded capsule no longer draws
+      if (!meters[Number(b.dataset.m)]) continue;
+      const { value: v, outer, stale } = meters[Number(b.dataset.m)];
+      b.classList.toggle('none', v == null);
+      // Not updated for longer than its file allows: grey, with the last percent
+      b.classList.toggle('stale', !!stale && v != null);
+      b.classList.toggle('ringed', outer != null);
+      b.querySelector('.pct').textContent = percent(v);
+      fill(b.querySelector('.dial'), v);
+      fill(b.querySelector('.outer'), outer);
+    }
+    for (const b of list.children) {
+      const it = shown[Number(b.dataset.i)];
+      // A key without a meter has its ring only while its program shows progress on the taskbar
+      if (it.ring == null) {
+        const v = rims.get(it.at), ring = b.querySelector('.ring');
+        if (v == null) ring?.remove();
+        else if (!ring) ringOn(b.querySelector('.key'));
+        if (v != null) fill(b.querySelector('.ring'), v);
+        continue;
+      }
+      fill(b.querySelector('.ring'), meters[it.ring] ? meters[it.ring].value : null);
+    }
+  }
+  // The keys and the meters share the room between them as `parts` in layout.rs does: neither part
+  // longer than what it holds, so the capsule never shows empty cells, and each with one whole key
+  // or meter. The line is the end of the keys' part, `share` of the room; without it the meters take
+  // all they need while the keys keep up to four cells. Rust works out the pill's length the same
+  // way; the page shares the room itself only while the line is pulled.
+  function parts(r, share) {
+    const keys = count * cell, all = meters.length * METER;
+    r = Math.max(r, 0);
+    if (!meters.length) return [Math.min(keys, r), 0];
+    const least = Math.min(keys, cell), leave = Math.min(all, METER);
+    if (least + leave > r) { const k = r * least / (least + leave); return [k, r - k]; }
+    const at = share != null ? Math.min(Math.max(share * r, least), Math.min(keys, r - leave))
+      : Math.min(keys, r - Math.min(all, Math.max(r - Math.min(keys, SHOWN * cell), leave)));
+    return [at, Math.min(all, r - at)];
+  }
+  // The room the two parts share now: as Rust sent it, or else what the pill leaves them
+  function roomNow() {
+    const i = signs ? 1 : 0;
+    if (room) return room[i];
+    return lengths ? lengths[i] - GRIP - ADD - END - (signs ? ADD + STRETCH : 0) - (meters.length ? LINE : 0) : 0;
+  }
+  function share() {
+    if (!meters.length) list.style.flex = gauges.style.flex = '';
+    else {
+      const [k, m] = parts(roomNow(), split);
+      list.style.flex = `0 0 ${k}px`;
+      gauges.style.flex = `0 0 ${m}px`;
+    }
+    stretch();
+  }
 
   // The foot of the pill. At rest it is the plus. A tap on the plus puts two signs in its place,
-  // the gear, which opens the settings window, and the arrow, which folds the capsule; the
-  // capsule is one sign longer meanwhile, and Rust is told so it sizes the window. SIGNS_MS
-  // after the last touch of a sign, or after a touch of any key, the plus is back.
+  // the gear, which opens the settings window, and the arrow, which folds the capsule, and the end
+  // grip after them; the capsule is one sign and the grip longer meanwhile, and Rust is told so it
+  // sizes the window. SIGNS_MS after the last touch of a sign, or after a touch of any key, the
+  // plus is back; not while the grip is dragged.
   let signs = false, signsTimer = null, closing = false;
   // Rust says how long the pill is with the plus and with the two signs, and sizes the window for
   // the same length. The pill is drawn that long whatever the window is at the moment: the window
@@ -238,19 +422,29 @@
   let lengths = null;
   function stretch() {
     if (!lengths) return;
-    const long = folded ? '' : lengths[signs ? 1 : 0] + 'px';
-    pill.style.height = flat() ? '' : long;
-    pill.style.width = flat() ? long : '';
+    let long = lengths[signs ? 1 : 0];
+    // A line pulled away from where the settings have it shortens or lengthens the pill by what its
+    // parts gain or lose: Rust has the length for the line in the settings only. The window follows
+    // once the line is let go
+    if (meters.length && split !== saved) {
+      const r = roomNow(), [k, m] = parts(r, split), [k0, m0] = parts(r, saved);
+      long += k + m - k0 - m0;
+    }
+    pill.style.height = flat() || folded ? '' : long + 'px';
+    pill.style.width = flat() && !folded ? long + 'px' : '';
   }
   function drawFoot() {
     for (const b of keys.querySelectorAll('.item.add')) b.remove();
+    tail.remove();
     const plus = shown.length - 3;
-    keys.append(...(signs ? [plus + 1, plus + 2] : [plus]).map(button));
-    stretch();
+    keys.append(...(signs ? [plus + 1, plus + 2] : [plus]).map(button), ...(signs ? [tail] : []));
+    share();
   }
+  // Not while the mouse is over the capsule: the timer starts again when it leaves. A finger or a
+  // pen leaves the cursor where it touched (`afterTouch`), and the signs go as ever
   function waitForSigns() {
     clearTimeout(signsTimer);
-    signsTimer = setTimeout(() => press ? waitForSigns() : closeSigns(), SIGNS_MS);
+    signsTimer = setTimeout(() => press || reaching || (overPill && !afterTouch) ? waitForSigns() : closeSigns(), SIGNS_MS);
   }
   // The foot grows before the window does and shrinks after it; the pill has its own length
   // (see stretch), so the list and the first sign stay where they are meanwhile
@@ -274,6 +468,7 @@
     hideCard();
     tablet = view.tablet;
     sound = view.click_sound;
+    lostWords = view.lost || '';
     theme = view.theme;
     paint();
     document.documentElement.style.setProperty('--accent', view.accent);
@@ -287,20 +482,39 @@
       stretch();
       before = [];
       shown = [{ name: '', glyph: view.unfold, unfold: true }];
+      meters = [];
+      gauges.replaceChildren();
       list.replaceChildren();
       keys.replaceChildren(button(0));
       return;
     }
     list.style.setProperty('--cell', view.cell + 'px');
+    cell = view.cell;
+    count = view.items.length;
+    rims = new Map(view.items.filter(it => it.rim != null).map(it => [it.at, it.rim]));
+    age = view.age ?? null;
+    meters = view.meters || [];
+    generation = view.generation ?? null;
+    // A view copied before the last event `meters` came reaches the page after it: the event's
+    // values are the newer ones, and an unchanged read sends no other
+    if (latest && latest.generation === generation && latest.readings > (view.readings ?? 0)) takeValues(latest.values);
+    split = saved = view.divider ?? null;
+    length = view.length ?? null;
+    reach = view.reach || [];
+    room = view.room || null;
+    noData = view.no_data || '—';
     shown = [...view.items, { name: view.add[0], hint: view.add[1], glyph: PLUS, add: true, sign: 'plus' },
       { ...view.gear, add: true, sign: 'gear' }, { ...view.fold, add: true, sign: 'fold' }];
     const fresh = setChange ? view.items.filter(it => !before.includes(it.at)).map(it => it.at) : [];
     before = view.items.map(it => it.at);
     const made = view.items.map((it, i) => button(i));
     list.replaceChildren(...made);
-    keys.replaceChildren(list);
+    gauges.replaceChildren(...meters.map((m, i) => gauge(i)));
+    keys.replaceChildren(list, ...(meters.length ? [divider, gauges] : []));
+    paintMeters();
     drawFoot();
-    fades();
+    fades(list);
+    fades(gauges);
     if (setChange) {
       // The list goes back to its start, where the first keys stand still and the program's keys
       // follow them, and the keys the program brought fade in where they land
@@ -308,16 +522,20 @@
       list.scrollTo({ top: 0, left: 0, behavior: calm.matches ? 'auto' : 'smooth' });
       made.filter((b, i) => fresh.includes(view.items[i].at)).forEach(appear);
     }
+    showAdded();
+    showTip();
   }
-  // The list says where it goes on: the end with more items past it fades out
-  function fades() {
-    const at = flat() ? list.scrollLeft : list.scrollTop;
-    const end = flat() ? list.scrollWidth - list.clientWidth : list.scrollHeight - list.clientHeight;
-    list.classList.toggle('more-before', at > 2);
-    list.classList.toggle('more-after', at < end - 2);
+  // A list says where it goes on: the end with more items past it fades out
+  function fades(box) {
+    const at = flat() ? box.scrollLeft : box.scrollTop;
+    const end = flat() ? box.scrollWidth - box.clientWidth : box.scrollHeight - box.clientHeight;
+    box.classList.toggle('more-before', at > 2);
+    box.classList.toggle('more-after', at < end - 2);
   }
-  list.addEventListener('scroll', fades, { passive: true });
-  new ResizeObserver(fades).observe(list);
+  for (const box of [list, gauges]) {
+    box.addEventListener('scroll', () => fades(box), { passive: true });
+    new ResizeObserver(() => fades(box)).observe(box);
+  }
 
   // Feedback: the key dips while it is held, and a tap that ran its action flashes it for
   // FLASH_MS, with a click if the settings ask for one. Neither moves focus.
@@ -353,22 +571,81 @@
     b.querySelector('.key').animate([{ transform: 'scale(.85)' }, { transform: 'none' }], { duration: APPEAR_MS, easing: 'ease-out' });
   }
 
+  // The card of programs added keys: their places in the settings file, kept until a drawing has
+  // them, which may come before or after Rust says so. The list scrolls until the last of them is in
+  // view, and they come in softly, as a program's keys do
+  // A drawing that comes while the list scrolls stops the scroll, so the places are kept until the
+  // last new key stands in view, or for ADDED_MS at most; they fade in only once.
+  const ADDED_MS = 3000;
+  let added = [], addedUntil = 0, faded = false;
+  function showAdded() {
+    if (!added.length || folded) return;
+    if (Date.now() > addedUntil) { added = []; return; }
+    const fresh = [...list.children].filter(b => added.includes(shown[Number(b.dataset.i)].at));
+    if (!fresh.length) return;
+    const last = fresh[fresh.length - 1];
+    if (!faded) { faded = true; fresh.forEach(appear); }
+    if (veiled(last)) reveal(last);
+    if (!veiled(last)) { added = []; startTip(); }
+  }
+  // Once the new keys stand in view, the label beside the list asks for a tap (`tip`, in the words
+  // Rust sent) until the first tap on a key, or for TIP_MS. It is the keys' own label, so the window
+  // lets it through as it does a key's name and the keys keep their presses. A drawing closes every
+  // label; this one comes back after it while its time lasts, and keeps hover from closing it
+  const TIP_MS = 6000;
+  let tip = null, tipWords = '', tipTimer = null;
+  function startTip() {
+    if (!tipWords) return;
+    tip = tipWords;
+    tipWords = '';
+    clearTimeout(tipTimer);
+    tipTimer = setTimeout(endTip, TIP_MS);
+    showTip();
+  }
+  function showTip() {
+    if (!tip || folded || press || failing || !card.hidden) return;
+    openCard(list, tip, '');
+  }
+  // Only the tip's own words are closed: a note in its place keeps its time
+  function endTip() {
+    clearTimeout(tipTimer);
+    if (!tip) return;
+    const showing = !card.hidden && cardFor === list && card.querySelector('.c-title').textContent === tip;
+    tip = null;
+    if (showing) hideCard();
+  }
+  // A note or a failure that came up in the tip's place goes after its time; the tip comes back if
+  // its own time is not over, which it keeps
+  function closeLabel() {
+    hideCard();
+    showTip();
+  }
+  window.__TAURI__.event.listen('added', e => { added = e.payload.at; tipWords = e.payload.tip; addedUntil = Date.now() + ADDED_MS; faded = false; showAdded(); });
+  list.addEventListener('scrollend', showAdded);
+
   // The name label: opens after a long press or a hover, closes on release, leave or a press elsewhere
   let cardTimer = null;
   let cardFor = null;
   // The label says that a key did not work: the cursor passing over the keys does not take it away
   let failing = false;
   function showCard(b) {
+    if (b.classList.contains('meter')) {
+      // What it says about time comes before the hint: when it resets, how long ago it was updated
+      const m = meters[Number(b.dataset.m)];
+      return openCard(b, m.name, m.value == null ? noData : percent(m.value), [...(m.notes || []), ...(m.hint || [])]);
+    }
     const it = shown[Number(b.dataset.i)];
-    openCard(b, it.name, it.hint);
+    openCard(b, it.name, it.lost ? lostWords : it.hint);
   }
   // The same label, level with `anchor`: an item, or the whole list for a note about the keys.
   // A folded capsule shows no label of any kind.
-  function openCard(anchor, title, sub) {
+  function openCard(anchor, title, sub, hint) {
     failing = false;
     if (folded) return;
     card.querySelector('.c-title').textContent = title;
     card.querySelector('.c-sub').textContent = sub || '';
+    // A file's hint, a line each
+    card.querySelector('.c-hint').replaceChildren(...(hint || []).map(line => Object.assign(document.createElement('div'), { textContent: line })));
     cardFor = anchor;
     card.hidden = false;
     placeCard();
@@ -437,6 +714,8 @@
   const lift = () => { for (const b of keys.querySelectorAll('.down')) b.classList.remove('down'); };
   const keyAt = i => keys.querySelector(`.item[data-i="${i}"]`);
   keys.addEventListener('pointerdown', e => {
+    // The meters, the line and the end grip take their presses themselves
+    if (e.target.closest('#meters, #divider, #stretch')) return;
     hideCard();
     const b = e.target.closest('.item');
     // The item is kept as it was at the press: the release taps it whatever is drawn by then
@@ -547,6 +826,7 @@
     const tap = still && !p.long && p.index >= 0 && keyAt(p.index);
     if (tap && p.veiled) reveal(keyAt(p.index));
     else if (tap) {
+      if (!it.add) endTip();
       flash(keyAt(p.index));
       click();
       // The plus opens the signs and the arrow folds the capsule. For anything else Rust is told
@@ -573,25 +853,231 @@
   window.addEventListener('pointercancel', drop);
   keys.addEventListener('lostpointercapture', drop);
 
+  // The line between the keys and the meters follows a finger, a pen or the mouse along the
+  // capsule; let go, it stays there, and Rust keeps the place in the settings file
+  let pull = null;
+  divider.addEventListener('pointerdown', e => {
+    hideCard();
+    pull = { id: e.pointerId, moved: false };
+    try { divider.setPointerCapture(e.pointerId); } catch (_) {}
+    divider.classList.add('pulled');
+    // Rust gives the window room for the longest pill the line can make, once, at the press: a
+    // pill grown past its window was cut, and a window changed while the line moves ends a touch
+    invoke('divider', { pulled: true });
+  });
+  // The line is where the keys' part ends, and stops where its keys end; the meters take what is
+  // left of the room up to all of them, and past that the pill is shorter. The share kept is the
+  // place drawn, so the line comes back where it was let go
+  divider.addEventListener('pointermove', e => {
+    if (!pull || pull.id !== e.pointerId) return;
+    const a = list.getBoundingClientRect(), r = roomNow();
+    const [from, at] = flat() ? [a.left, e.clientX] : [a.top, e.clientY];
+    if (r <= 0) return;
+    split = parts(r, Math.min(Math.max((at - from - LINE / 2) / r, 0), 1))[0] / r;
+    pull.moved = true;
+    share();
+  });
+  function letGo(e) {
+    if (!pull || pull.id !== e.pointerId) return;
+    const moved = pull.moved;
+    pull = null;
+    divider.classList.remove('pulled');
+    // The capsule is drawn anew once Rust has the new place and has sized the window for it:
+    // drawn before, it would put the line back where it was
+    if (moved) invoke('set_divider', { at: split }).catch(() => {}).then(() => { putOff(); afterPress(); });
+    else { invoke('divider', { pulled: false }); afterPress(); }
+  }
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) divider.addEventListener(type, letGo);
+
+  // The end grip follows a finger, a pen or the mouse along the capsule, a whole cell at a time:
+  // the pill is drawn as long as Rust said for that many cells (`reach`). The window and its region
+  // have been as long as the longest of them since the signs opened, with the pill's start held
+  // still, and do not change during the drag: a touch whose window changed under it was ended. Let go, Rust keeps the
+  // length in the settings file (`set_length`), once. `cells` is the length the drag has set, none
+  // until the pill first moved. Drawings wait for the release; a change of what the lengths were
+  // worked out for ends the drag, and Rust says so (`stretch`). A press taken away (`pointercancel`)
+  // ends it without a save; a lost capture does not, as long as the pointer's events still come
+  // within LOST_MS.
+  const LOST_MS = 600;
+  let reaching = null;
+  tail.addEventListener('pointerdown', e => {
+    hideCard();
+    if (!lengths || !reach.length) return;
+    reaching = { id: e.pointerId, at: along(e), long: lengths[1], cells: null, mouse: e.pointerType === 'mouse', lost: null };
+    try { tail.setPointerCapture(e.pointerId); } catch (_) {}
+    tail.classList.add('pulled');
+    waitForSigns();
+    invoke('resize', { cells: null, step: 'start', pointer: e.pointerType || 'unknown' });
+  });
+  // The pointer is at `to` along the capsule
+  function reachTo(to) {
+    // The length drawn now is one of the steps, so the pill moves only once the pointer is nearer
+    // another: a capsule shorter than the least step grows to it after a real move, not a touch
+    const want = reaching.long + to - reaching.at;
+    const [cells, long, rm] = [[reaching.cells, lengths[1]], ...reach].reduce((best, r) => Math.abs(r[1] - want) < Math.abs(best[1] - want) ? r : best);
+    if (long === lengths[1]) return;
+    reaching.cells = length = cells;
+    lengths = [lengths[0], long];
+    if (room) room = [room[0], rm ?? room[1]];
+    stretch();
+    // The keys and the meters share the new room, each keeping one whole key or meter
+    share();
+    invoke('resize', { cells, step: 'step' });
+  }
+  const ours = e => reaching && reaching.id === e.pointerId;
+  window.addEventListener('pointermove', e => {
+    if (!ours(e)) return;
+    if (reaching.lost) { clearTimeout(reaching.lost); reaching.lost = setTimeout(() => endReach('lost capture'), LOST_MS); }
+    reachTo(along(e));
+  });
+  // The drag is over: let go, it saves what it set; taken away (`why`), it saves nothing
+  function endReach(why) {
+    const { cells, lost } = reaching;
+    clearTimeout(lost);
+    reaching = null;
+    tail.classList.remove('pulled');
+    waitForSigns();
+    // The capsule is drawn anew once Rust has the length: reading the saved file back finds nothing new
+    if (cells != null && !why) return invoke('set_length', { cells }).catch(() => {}).then(() => { putOff(); afterPress(); });
+    invoke('resize', { cells: null, step: 'end', why: why || 'let go without a move' }).catch(() => {});
+    if (cells != null) putOff();
+    afterPress();
+  }
+  window.addEventListener('pointerup', e => { if (ours(e)) endReach(null); });
+  window.addEventListener('pointercancel', e => { if (ours(e)) endReach('pointercancel'); });
+  tail.addEventListener('lostpointercapture', e => {
+    if (ours(e) && !reaching.lost) reaching.lost = setTimeout(() => endReach('lost capture'), LOST_MS);
+  });
+  // Rust ended the drag: the keyboard, the program in front, the settings or the screen changed,
+  // and the lengths are of the old ones. Nothing is saved; the capsule is drawn anew
+  window.__TAURI__.event.listen('stretch', () => {
+    if (!reaching) return;
+    const { id, lost } = reaching;
+    clearTimeout(lost);
+    reaching = null;
+    tail.classList.remove('pulled');
+    try { tail.releasePointerCapture(id); } catch (_) {}
+    putOff();
+    afterPress();
+  });
+
+  // Presses on the meters: a tap on one that reads a program opens the program; held for
+  // LONG_PRESS_MS it shows its name and percent; a finger that moves scrolls the meters
+  let tick = null;
+  const dropTick = () => {
+    if (!tick) return;
+    if (tick.b) tick.b.classList.remove('down');
+    tick = null;
+    hideCard();
+    afterPress();
+  };
+  gauges.addEventListener('pointerdown', e => {
+    hideCard();
+    const b = e.target.closest('.meter');
+    tick = { id: e.pointerId, b, x: e.clientX, y: e.clientY, scroll: flat() ? gauges.scrollLeft : gauges.scrollTop, mouse: e.pointerType === 'mouse', long: false, scrolling: false };
+    try { gauges.setPointerCapture(e.pointerId); } catch (_) {}
+    if (!b) return;
+    b.classList.add('down');
+    cardTimer = setTimeout(() => {
+      if (!tick || tick.b !== b) return;
+      tick.long = true;
+      showCard(b);
+      cardTimer = setTimeout(dropTick, LABEL_STAYS_MS);
+    }, LONG_PRESS_MS);
+  });
+  gauges.addEventListener('pointermove', e => {
+    const p = tick;
+    if (!p || p.id !== e.pointerId) return;
+    if (!p.scrolling && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP) return;
+    if (p.mouse) return;
+    p.scrolling = true;
+    hideCard();
+    if (p.b) p.b.classList.remove('down');
+    if (flat()) gauges.scrollLeft = p.scroll - (e.clientX - p.x);
+    else gauges.scrollTop = p.scroll - (e.clientY - p.y);
+  });
+  gauges.addEventListener('pointerup', e => {
+    const p = tick;
+    if (!p || p.id !== e.pointerId) return;
+    tick = null;
+    if (p.b) p.b.classList.remove('down');
+    hideCard();
+    if (signs) closeSigns();
+    const still = !p.scrolling && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP;
+    const m = p.b && meters[Number(p.b.dataset.m)];
+    if (still && !p.long && m && m.target) {
+      click();
+      // The meter goes with its name and program: Rust opens nothing if its place holds another
+      invoke('open_meter', { index: Number(p.b.dataset.m), name: m.name, target: m.target });
+    }
+    afterPress();
+  });
+  gauges.addEventListener('pointercancel', dropTick);
+  gauges.addEventListener('lostpointercapture', dropTick);
+  gauges.addEventListener('wheel', e => { if (flat()) gauges.scrollLeft += e.deltaY; }, { passive: true });
+  // A meter's label does not follow it along its list: it closes
+  gauges.addEventListener('scroll', () => { if (cardFor && cardFor.parentElement === gauges) hideCard(); }, { passive: true });
+
+  // Rust reads the meters about once a second and sends their values when one changed: a
+  // percent with a file's outer ring and hint, or null where nothing was found, for each meter of
+  // the settings file. Values of
+  // another generation are of another list than the one drawn, and go to no meter; the drawing
+  // of the new list brings its own
+  // `latest` is the newest event, by the count of changes Rust keeps (`readings`), which a drawing
+  // copied earlier must not undo
+  let latest = null;
+  const takeValues = values => values.forEach((r, i) => { if (meters[i]) Object.assign(meters[i], { value: r ? r.value : null, outer: r ? r.outer : null, hint: r ? r.hint : [], stale: !!(r && r.stale), notes: (r && r.notes) || [] }); });
+  window.__TAURI__.event.listen('meters', e => {
+    const p = e.payload;
+    if (latest && p.readings != null && p.readings <= latest.readings) return;
+    if (p.readings != null) latest = p;
+    if (p.generation !== generation) return;
+    takeValues(p.values);
+    paintMeters();
+    // An open label of a meter says the new value; new lines of hint change its size
+    if (!card.hidden && cardFor && cardFor.classList.contains('meter')) showCard(cardFor);
+  });
+  // Rust reads the taskbar in the same round and sends, when it or the list changed, `[place,
+  // percent]` for each item without a meter whose program shows progress there. Places of another
+  // list than the one drawn go to no key; the drawing of the new list brings its own
+  window.__TAURI__.event.listen('rims', e => {
+    if (e.payload.age !== age) return;
+    rims = new Map(e.payload.rims);
+    if (!folded) paintMeters();
+  });
+
   // Hover. The page gets no mouse movement in a window that never takes focus, so Rust reports
   // where the cursor is over the capsule (CSS px) or null when it has left. The item under the
   // cursor lights up and, after HOVER_MS, shows its label. After a finger or a pen press hover
   // stays off until the cursor leaves. Without a keyboard there is no hover label at all.
-  let hot = null, afterTouch = false;
+  // `overPill`: the cursor is over the pill itself, not the transparent rest of the window; the
+  // signs stay up meanwhile unless a finger or a pen put the cursor there (see waitForSigns)
+  let hot = null, afterTouch = false, overPill = false;
   function hover(at) {
+    const wasOver = overPill && !afterTouch;
+    overPill = !!at && !!document.elementFromPoint(at[0], at[1])?.closest('#pill');
+    // A window that never takes focus may not pass the mouse's movement to the page while a button
+    // is down either: the cursor Rust reports moves the end grip too. Only for the mouse: a finger
+    // or a pen leaves the cursor where it was, and it would pull the length back
+    if (reaching && reaching.mouse && at) return reachTo(flat() ? at[0] : at[1]);
     if (!at) afterTouch = false;
+    // The mouse left the pill: the signs have their time again from now
+    if (signs && wasOver && !overPill) waitForSigns();
     if (!at && press && press.long && !press.carry) drop();
     const el = at && !afterTouch && !press ? document.elementFromPoint(at[0], at[1]) : null;
-    const b = el ? el.closest('.item') : null;
+    const b = el ? el.closest('.item, .meter') : null;
     grip.classList.toggle('hot', !!el && !!el.closest('#grip'));
+    divider.classList.toggle('hot', !!el && !!el.closest('#divider'));
+    tail.classList.toggle('hot', !!el && !!el.closest('#stretch'));
+
     if (b === hot) return;
     if (hot) hot.classList.remove('hot');
     hot = b;
     if (press) return;
-    if (!failing) hideCard();
+    if (!failing && !tip) hideCard();
     if (!b) return;
     b.classList.add('hot');
-    if (!tablet && !failing) cardTimer = setTimeout(() => showCard(b), HOVER_MS);
+    if (!tablet && !failing && !tip) cardTimer = setTimeout(() => showCard(b), HOVER_MS);
   }
   keys.addEventListener('pointerdown', e => {
     afterTouch = e.pointerType !== 'mouse';
@@ -626,12 +1112,12 @@
   function fail(f) {
     failed = press ? f : null;
     if (press || folded) return;
-    const anchor = f.at == null ? keys.querySelector('.item.add:last-child') : keyAt(shown.findIndex(it => it.at === f.at));
+    const anchor = f.at == null ? keys.querySelector('.item.add:last-of-type') : keyAt(shown.findIndex(it => it.at === f.at));
     if (!anchor) return;
     clearTimeout(cardTimer);
     openCard(anchor, f.title, f.why);
     failing = true;
-    cardTimer = setTimeout(hideCard, FAILED_MS);
+    cardTimer = setTimeout(closeLabel, FAILED_MS);
   }
   window.__TAURI__.event.listen('failed', e => fail(e.payload));
 
@@ -640,29 +1126,33 @@
   // for a moment beside the list, the way a key's label does.
   // Any drawing waits while a key is held, whether the press came before the change or while
   // Rust was answering: the keys are not redrawn under the finger, the held key keeps its label,
-  // and the release taps the key it was on. `later` is the drawing put off: whether it brings a
-  // new set, and its note.
+  // and the release taps the key it was on. So does a drawing while a meter is pressed, whose
+  // release opens the program of the meter it was on, and while the line before the meters is
+  // pulled: it would put the line back where it was, and while the end grip is dragged: it would
+  // put the length back. `later` is the drawing put off: whether it
+  // brings a new set, and its note.
   let later = null;
   function putOff(set, note) {
     later = { set: set || !!(later && later.set), note: note || (later && later.note) || null };
   }
   // Resolves once the keys are drawn, or put off again.
   async function redraw(set = false, note = null) {
-    if (press) return putOff(set, note);
+    if (press || pull || tick || reaching) return putOff(set, note);
     const view = await invoke('get_view');
-    if (press) return putOff(set, note);
+    if (press || pull || tick || reaching) return putOff(set, note);
+
     setChange = setChange || set;
     render(view);
     if (!note) return;
     openCard(list, note, '');
-    cardTimer = setTimeout(hideCard, NOTE_MS);
+    cardTimer = setTimeout(closeLabel, NOTE_MS);
   }
   // The drawing that was put off comes first: drawing closes any label, so the words about a key
   // that did not work come up after it, beside the key as it stands then.
   function afterPress() {
     const f = failed;
     failed = null;
-    if (!later) return f && fail(f);
+    if (!later) return f ? fail(f) : showTip();
     const { set, note } = later;
     later = null;
     redraw(set, note).then(() => f && fail(f));
