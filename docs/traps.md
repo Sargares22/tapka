@@ -58,9 +58,9 @@ The words are explained in `docs/map.md`. Read this before changing any code.
 - A key with less than two thirds of it clear of the fading end of the list does not fire on
   a tap; the list scrolls to show it.
 - The page takes the pill's length for each number of cells from Rust (`reach` in the view), never
-  from its own sums: the peek of the next key comes and goes with the cells. Only while the divider
-  is pulled does it change that length itself, by what its parts gain or lose (`parts` in the page,
-  the same rule as `layout::parts`, and the `room` Rust sends): the two must stay one rule.
+  from its own sums: the peek of the next key comes and goes with the cells. The divider never
+  changes that length; the page shares the `room` Rust sends with `parts`, the same rule as
+  `layout::parts`: the two must stay one rule.
 - The signs stay while the mouse is over the pill (`overPill`), not over the window: the window is
   wider by the label's room. A finger or a pen moves the cursor to where it touched, so the cursor
   counts only when no finger or pen pressed since it last left (`afterTouch`); without that the signs
@@ -71,7 +71,11 @@ The words are explained in `docs/map.md`. Read this before changing any code.
   pulled-back rule, and the most cells are what fits from there. A capsule pulled back against the
   end of the work area is only shortened in place; it is carried higher to be made longer.
 - The signs make the pill one sign and the end grip longer (`ADD + STRETCH`); `fold_spot` counts the
-  grip when it finds the fold sign's middle.
+  grip when it finds the fold sign's middle. The room of the keys and the meters is worked out with
+  the plus and kept with the signs (`layout::room`): worked out again against the smaller room the
+  work area leaves beside the signs, it was rounded down to fewer whole keys, and opening the signs
+  made the pill shorter (found 22.10.2026). Only a pill with the signs past the work area is cut,
+  to its end.
 - `set_length` changes the settings in memory before the file, like `set_divider`; the page draws
   anew itself once the call returns. It applies in turn with `reload_settings` (`APPLYING`) and
   places the capsule from the settings as they are then: a copy taken before would undo an edge
@@ -155,19 +159,23 @@ The words are explained in `docs/map.md`. Read this before changing any code.
   (`win::app_windows`, left as it was).
 - COM is started on a thread by `win::Com`, which ends it when dropped: made before the COM objects
   of its scope (the last field of `meters::Reader`), so it ends after them.
-- The pill is as long as its keys and meters need, up to `layout::room_for` (`layout::parts`): every
-  place that sizes the capsule window passes the number of meters and the divider, or the page draws
-  a pill of another length than its window. A part never holds more than its keys or meters, so
-  pulling the divider can shorten the pill, and pulling it back lengthen it. So the press on the line
-  (`divider`) gives the window and its region room at once for the longest pill the line can make
-  (the one with no divider), from where the pill starts (`layout::held`), and only the release puts
-  them back to the pill (`set_divider`, or `divider` without a move). Grown step by step during the
-  pull, the window would change under the finger, which ended a touch of the end grip; not grown at
-  all, a pill pulled longer was cut at the window's end with its keys, meter and foot (found
-  21.10.2026). While the line is held the transparent rest of the window takes presses.
+- The pill is as long as its keys and meters need, up to `layout::room_for` (`layout::room`): every
+  place that sizes the capsule window passes the number of meters, or the page draws a pill of
+  another length than its window. The divider is not part of the length: when a pulled line made the
+  pill shorter or longer, the window lagged behind it and cut the keys at its end (found 21.10.2026);
+  now the line only moves the border inside a room of one length, and the window never changes for it.
+- With meters the line steps by whole meters, not keys (`layout::parts`): the meters' part is one
+  meter or more and no more than all of them, the keys' part the rest, a key's cell or more and no
+  more than all keys, and it scrolls with the next key's edge fading. Stepped by whole keys, the
+  line could never show three meters in a room of eight cells with eight keys (found 22.10.2026).
+  Only a single key may find no such place in a room; `layout::room` then cuts the room back to one.
+- A `length` counts cells for the keys and the meters together, with no fixed number of meters
+  beside them: room for two meters on top of the cells once kept a third meter cut in half at the
+  grip's last step, which stopped once the keys fitted (found 22.10.2026). The last step of `reach`
+  is the fewest cells whose room holds every key and meter whole.
 - The divider is where the keys' part ends, as a share of the room, and the share saved is the place
-  drawn (clamped by `parts`), never the pointer past the last key: a share past it would make the
-  meters jump at the next press.
+  drawn (whole meters, `parts`), never the pointer past the last key: a share past it would make the
+  meters jump at the next press. An older share in the file goes to the nearest number of meters.
 - The end grip's steps stop at the fewest cells that show every key and meter (`layout::reach`):
   more cells would draw the same pill, and the drag would save a length nobody saw.
 - The values in `meter_values` go by the meter's place in the list. When the list changes,
@@ -175,15 +183,22 @@ The words are explained in `docs/map.md`. Read this before changing any code.
   dropped (`meters::Values::publish`), and the values are told to the page under their lock, so
   the two readers' news arrive in order. `get_view` copies the settings and the values under both
   locks, and the event `meters` carries its generation: the page drops values of another
-  generation than the list it drew.
+  generation than the list it drew. The new generation keeps what was read for each meter still on
+  the list, at its new place (`meters::Values::renew`): a meter carried to another place does not
+  go grey until the next read, and no value lands on the meter that took its old place.
 - A drawing of the capsule waits while the divider is pulled and comes after Rust has the new
-  place; otherwise it puts the divider back where it was. It waits too while a meter is pressed:
+  place; otherwise it puts the divider back where it was. It waits too while a meter is pressed
+  or carried (a carried meter stays where it was put until the reload after `move_meter`). The
+  file may change meanwhile, so `move_item` and `move_meter` send the entry as it was drawn with its
+  places, and Rust moves nothing when the file has another there (`config::entry_at`).
+  While a meter is pressed the cursor Rust reports does not touch its label (`hover`), and a finger
+  that moves closes the label only once the meters really scrolled:
   `open_meter` goes by the meter's place, and the page sends the meter's name and program with it,
   which Rust checks before it opens anything.
 - `set_divider` changes the settings in memory before it writes the file, so reading the file
   back finds nothing new and does not redraw the capsule under the finger. A write that failed
   puts the memory back and only logs: the capsule shows the line where the finger left it.
-- Each part keeps one whole key or meter (`layout::parts`, `parts` in `ui/index.html`), when the line
+- Each part keeps a key's cell or one whole meter (`layout::parts`, `parts` in `ui/index.html`), when the line
   is pulled, when the place comes from the file and when the list changes; the share in the file
   stays as it was, so a larger screen gets it back.
 - A time without an offset in a meter's file is the local time of this machine (`meters::moment`); with

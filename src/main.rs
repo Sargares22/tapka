@@ -63,9 +63,6 @@ struct AppState {
     holds: Mutex<actions::Holds>,
     /// The two signs show in the capsule's foot in place of the plus: the capsule is one sign longer.
     signs: AtomicBool,
-    /// The divider is held: the window has room for the longest pill the line can make, from where
-    /// the pill starts (`layout::held`).
-    pulling: AtomicBool,
     /// The signs are open, and with them the end grip: the window is as long as the grip may
     /// stretch the capsule (`Stretch`).
     stretched: Mutex<Option<Stretch>>,
@@ -246,18 +243,16 @@ struct Carry {
     items: usize,
     meters: usize,
     length: Option<usize>,
-    divider: Option<f64>,
     signs: bool,
     /// The capsule is folded: what is carried, and what lands, is the folded key.
     folded: bool,
 }
 /// What the capsule's length depends on besides its cells: the work area, px per CSS px, the
-/// cell, the keys that show, the meters, the edge, the place along it, the saved length and the
-/// divider.
-type Geometry = ((i32, i32, i32, i32), f64, f64, usize, usize, layout::Edge, f64, Option<usize>, Option<f64>);
+/// cell, the keys that show, the meters, the edge, the place along it and the saved length.
+type Geometry = ((i32, i32, i32, i32), f64, f64, usize, usize, layout::Edge, f64, Option<usize>);
 
 fn geometry(work: (i32, i32, i32, i32), k: f64, cell: f64, shown: usize, settings: &config::Settings) -> Geometry {
-    (work, k, cell, shown, settings.meters.len(), settings.edge, settings.top, settings.length, settings.divider)
+    (work, k, cell, shown, settings.meters.len(), settings.edge, settings.top, settings.length)
 }
 
 /// What of the geometry changed, for the log.
@@ -270,8 +265,7 @@ fn what_changed(was: &Geometry, now: &Geometry) -> &'static str {
         _ if was.4 != now.4 => "the meters",
         _ if was.5 != now.5 => "the edge",
         _ if was.6 != now.6 => "the place",
-        _ if was.7 != now.7 => "the saved length",
-        _ => "the divider",
+        _ => "the saved length",
     }
 }
 
@@ -371,7 +365,7 @@ struct View {
     /// as its keys, up to four.
     length: Option<usize>,
     /// The room the keys and the meters share, with the plus in the foot and with the two signs
-    /// (`layout::room`): the page shares it as Rust does while the divider is pulled.
+    /// (`layout::room`): the page shares it between them as Rust does (`layout::parts`).
     room: Option<(f64, f64)>,
     /// What the end grip may stretch the capsule to: each number of cells with the length of the
     /// pill with the two signs and the room its keys and meters share, from two cells to the fewest
@@ -479,7 +473,7 @@ fn get_view(app: AppHandle) -> View {
     let cell = layout::cell(tablet);
     let (n, m) = (items.len(), settings.meters.len());
     let pill = work_area(&app).map(|(work, k)| {
-        let long = |signs| layout::pill_length(work, k, cell, n, m, settings.edge, signs, settings.length, settings.divider);
+        let long = |signs| layout::pill_length(work, k, cell, n, m, settings.edge, signs, settings.length);
         (long(false), long(true))
     });
     let room = work_area(&app).map(|(work, k)| {
@@ -487,10 +481,10 @@ fn get_view(app: AppHandle) -> View {
         (room(false), room(true))
     });
     let reach = work_area(&app).map_or(Vec::new(), |(work, k)| {
-        let (_, most) = layout::reach(work, k, settings.top, cell, n, m, settings.edge, settings.length, settings.divider);
+        let (_, most) = layout::reach(work, k, settings.top, cell, n, m, settings.edge, settings.length);
         (layout::LEAST..=most)
             .map(|cells| {
-                let long = layout::pill_length(work, k, cell, n, m, settings.edge, true, Some(cells), settings.divider);
+                let long = layout::pill_length(work, k, cell, n, m, settings.edge, true, Some(cells));
                 (cells, long, layout::room(work, k, cell, n, m, settings.edge, true, Some(cells)))
             })
             .collect()
@@ -859,9 +853,8 @@ fn meter_windows(meter: &config::Meter) -> Vec<isize> {
 /// keys take. The page has drawn it there already; the settings change before the file does, so
 /// reading the saved file back redraws nothing. A file that could not be written takes the
 /// settings back to what they were, unless something else has changed the divider meanwhile; the
-/// log says why. Either way the window is sized for the pill as the settings are then: a part that
-/// stopped at what it holds made the pill shorter, and one given room again longer
-/// (`layout::parts`); the page draws anew once the call returns.
+/// log says why. The pill keeps its length wherever the line stands (`layout::parts`), so the
+/// window stays as it is; the page draws anew once the call returns.
 #[tauri::command(async)]
 fn set_divider(app: AppHandle, at: f64) -> Result<(), String> {
     let _turn = APPLYING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -874,24 +867,7 @@ fn set_divider(app: AppHandle, at: f64) -> Result<(), String> {
             settings.divider = before;
         }
     });
-    state.pulling.store(false, Ordering::Relaxed);
-    let settings = state.settings.lock().unwrap().clone();
-    place_capsule(&app, &settings);
     saved
-}
-
-/// The divider is pressed (`pulled`), or let go without a move. Pressed, the window and its region
-/// take room at once for the longest pill the line can make, with the pill's start held still, so
-/// the pill the page draws never runs past the window while the line moves; let go, they are as the
-/// pill is. Nothing changes during the pull itself.
-#[tauri::command]
-fn divider(app: AppHandle, pulled: bool) {
-    let state = app.state::<AppState>();
-    if state.pulling.swap(pulled, Ordering::Relaxed) == pulled {
-        return;
-    }
-    let settings = state.settings.lock().unwrap().clone();
-    place_capsule(&app, &settings);
 }
 
 /// The end grip is being dragged: `step` is `start` when it is pressed, `step` for each new number of
@@ -907,7 +883,7 @@ fn resize(app: AppHandle, cells: Option<usize>, step: String, pointer: Option<St
     let Some((work, k)) = work_area(&app) else { return };
     let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
     let shown = shown_now(&app, &settings.items).len();
-    let (_, most) = layout::reach(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, settings.length, settings.divider);
+    let (_, most) = layout::reach(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, settings.length);
     let cells = cells.map(|c| c.clamp(layout::LEAST, most));
     match step.as_str() {
         "start" => applog(&app, &format!("length: drag start {} ({})", settings.length.unwrap_or(shown.min(layout::SHOWN)), pointer.as_deref().unwrap_or("unknown"))),
@@ -933,7 +909,7 @@ fn set_length(app: AppHandle, cells: usize) -> Result<(), String> {
     let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
     let before = state.settings.lock().unwrap().clone();
     let shown = shown_now(&app, &before.items).len();
-    let (along, most) = layout::reach(work, k, before.top, cell, shown, before.meters.len(), before.edge, before.length, before.divider);
+    let (along, most) = layout::reach(work, k, before.top, cell, shown, before.meters.len(), before.edge, before.length);
     let cells = cells.clamp(layout::LEAST, most);
     // As the file will have it, so reading the file back changes nothing
     let top = config::share(along).as_f64().unwrap_or(along);
@@ -1023,7 +999,7 @@ fn fold(app: AppHandle) -> Result<(), String> {
     let (work, k) = work_area(&app).ok_or("no screen")?;
     let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
     let shown = shown_now(&app, &settings.items).len();
-    let open = layout::window_rect_with(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, true, settings.length, settings.divider);
+    let open = layout::window_rect_with(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, true, settings.length);
     let at = layout::along_from(work, k, layout::fold_spot(open, k, settings.edge), settings.edge);
     set_fold(&app, true, Some(at));
     Ok(())
@@ -1108,7 +1084,7 @@ fn place_capsule(app: &AppHandle, settings: &config::Settings) {
                 *stretched = None;
             }
             if signs && stretched.is_none() {
-                let (along, most) = layout::reach(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, settings.length, settings.divider);
+                let (along, most) = layout::reach(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, settings.length);
                 *stretched = Some(Stretch { along, most, of: now, dragging: false });
             }
             (*stretched, ended)
@@ -1118,14 +1094,7 @@ fn place_capsule(app: &AppHandle, settings: &config::Settings) {
             let _ = app.emit("stretch", why);
         }
         let (along, length) = stretch.map_or((settings.top, settings.length), |s| (s.along, Some(s.most)));
-        let window = layout::window_rect_with(work, k, along, cell, shown, settings.meters.len(), settings.edge, signs, length, settings.divider);
-        if state.pulling.load(Ordering::Relaxed) {
-            // Without a divider the parts fill the most of the room any place of the line can
-            let longest = layout::window_rect_with(work, k, along, cell, shown, settings.meters.len(), settings.edge, signs, length, None);
-            layout::held(window, if settings.edge == layout::Edge::Top { longest.2 } else { longest.3 }, work, settings.edge)
-        } else {
-            window
-        }
+        layout::window_rect_with(work, k, along, cell, shown, settings.meters.len(), settings.edge, signs, length)
     };
     if settings.folded {
         *state.stretched.lock().unwrap() = None;
@@ -1178,14 +1147,14 @@ fn carry_begin(app: &AppHandle, handle: isize) {
     };
     let Ok(hwnd) = w.hwnd().map(|h| h.0 as isize) else { return };
     let (Some(capsule), Some(grip)) = (win::window_rect(hwnd), win::window_rect(handle)) else { return };
-    let (items, meters, length, divider, folded) = {
+    let (items, meters, length, folded) = {
         let s = state.settings.lock().unwrap();
-        (s.items.clone(), s.meters.len(), s.length, s.divider, s.folded)
+        (s.items.clone(), s.meters.len(), s.length, s.folded)
     };
     let (cell, items) = (layout::cell(state.tablet.load(Ordering::Relaxed)), shown_now(app, &items).len());
     let offset = (capsule.0 - grip.0, capsule.1 - grip.1);
     let signs = state.signs.load(Ordering::Relaxed);
-    *state.carry.lock().unwrap() = Some(Carry { hwnd, offset, work, strip, k, cell, items, meters, length, divider, signs, folded });
+    *state.carry.lock().unwrap() = Some(Carry { hwnd, offset, work, strip, k, cell, items, meters, length, signs, folded });
     state.card_open.store(false, Ordering::Relaxed);
     let _ = app.emit("carry", ());
 }
@@ -1205,7 +1174,7 @@ fn carry_step(app: &AppHandle, x: i32, y: i32) -> (i32, i32) {
     let landing = if c.folded {
         layout::folded_window(c.work, c.k, along, edge)
     } else {
-        layout::window_rect_with(c.work, c.k, along, c.cell, c.items, c.meters, edge, c.signs, c.length, c.divider)
+        layout::window_rect_with(c.work, c.k, along, c.cell, c.items, c.meters, edge, c.signs, c.length)
     };
     grab::show_slot(layout::pill_on_screen(landing, c.k, edge), (layout::RADIUS * c.k).round() as i32, c.hwnd);
     (cx - ox, cy - oy)
@@ -1493,14 +1462,42 @@ fn dock_candidates(app: AppHandle) -> Vec<Value> {
 }
 
 /// A key was carried to another place on the capsule: the item at `from` of the settings' list
-/// goes where the item at `to` is.
+/// goes where the item at `to` is. `name` is the item as the page drew it (`moved`).
 #[tauri::command(async)]
-fn move_item(app: AppHandle, from: usize, to: usize) -> Result<(), String> {
-    change_settings(&app, |text| config::with_moved(text, from, to))?;
+fn move_item(app: AppHandle, from: usize, to: usize, name: String) -> Result<(), String> {
+    moved(&app, "items", from, to, (name, None))?;
     applog(&app, &format!("order: item {} moved to place {}", from + 1, to + 1));
     reload_settings(&app);
     let _ = app.emit("reload", ());
     Ok(())
+}
+
+/// A meter was carried to another place among the meters: the meter at `from` of the settings'
+/// list goes where the meter at `to` is. The values read so far go with their meters
+/// (`meters::Values::renew`). `name` and `target` are the meter as the page drew it (`moved`).
+#[tauri::command(async)]
+fn move_meter(app: AppHandle, from: usize, to: usize, name: String, target: Option<String>) -> Result<(), String> {
+    moved(&app, "meters", from, to, (name, target))?;
+    applog(&app, &format!("order: meter {} moved to place {}", from + 1, to + 1));
+    reload_settings(&app);
+    let _ = app.emit("reload", ());
+    Ok(())
+}
+
+/// Moves the entry at `from` of the list `key` in the settings file to `to`, as long as the file
+/// still has there the entry the page carried (`config::entry_at`): the page draws nothing new
+/// while an entry is held, and the file may have changed meanwhile, so the places could name
+/// another one. Then nothing moves, and the log says so.
+fn moved(app: &AppHandle, key: &str, from: usize, to: usize, carried: (String, Option<String>)) -> Result<(), String> {
+    let mut gone = false;
+    let saved = change_settings(app, |text| {
+        gone = config::entry_at(text, key, from).as_ref() != Some(&carried);
+        if gone { None } else { config::with_moved(text, key, from, to) }
+    });
+    if gone {
+        applog(app, &format!("order: {key} {} is not \"{}\" any more, nothing moves", from + 1, carried.0));
+    }
+    saved
 }
 
 #[tauri::command(async)]
@@ -2019,10 +2016,11 @@ fn reload_settings(app: &AppHandle) {
     }
     {
         let mut now = state.settings.lock().unwrap();
-        // The values read for the old list would stand at other meters of the new one. Changed
-        // with the settings held, so no read can take the old list after this and publish late
+        // The values read for the old list would stand at other meters of the new one: they go
+        // with their meters to their new places. Changed with the settings held, so no read can
+        // take the old list after this and publish late
         if settings.meters != now.meters {
-            state.meter_values.lock().unwrap().reset(settings.meters.len());
+            state.meter_values.lock().unwrap().renew(&now.meters, &settings.meters);
         }
         // Counted with the settings held, so the items and their age are always taken together
         if settings.items != now.items {
@@ -2668,7 +2666,6 @@ fn main() {
             card,
             open_meter,
             set_divider,
-            divider,
             resize,
             set_length,
             get_settings,
@@ -2679,6 +2676,7 @@ fn main() {
             save_docked,
             use_path,
             move_item,
+            move_meter,
             installed_apps,
             pinned_apps,
             first_programs,
@@ -2724,7 +2722,6 @@ fn main() {
                 showing: Mutex::new(()),
                 holds: Mutex::new(actions::Holds::default()),
                 signs: AtomicBool::new(false),
-                pulling: AtomicBool::new(false),
                 stretched: Mutex::new(None),
                 items_age: std::sync::atomic::AtomicU32::new(0),
                 meter_values: Mutex::new(meter_values),

@@ -479,16 +479,33 @@ pub fn with_landing(text: &str, edge: Edge, folded: bool, along: f64) -> Option<
     with_field(&text, if folded { "folded_at" } else { "top" }, share(along))
 }
 
-/// The settings text with the item at `from` put where the item at `to` is. Both count the items
-/// the panel uses, the way `parse` numbers them; an item the panel skips keeps its place in the file.
-pub fn with_moved(text: &str, from: usize, to: usize) -> Option<String> {
+/// The settings text with the entry at `from` of the list `key`, `items` or `meters`, put where the
+/// entry at `to` is. Both count the entries the panel uses, the way `parse` numbers them; an entry
+/// the panel skips keeps its place in the file.
+pub fn with_moved(text: &str, key: &str, from: usize, to: usize) -> Option<String> {
     let mut v: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
-    let items = v.get_mut("items")?.as_array_mut()?;
-    let used: Vec<usize> = (0..items.len()).filter(|&i| parse_item(&items[i]).is_ok()).collect();
+    let items = v.get_mut(key)?.as_array_mut()?;
+    let used: Vec<usize> = (0..items.len()).filter(|&i| if key == "meters" { parse_meter(&items[i]).is_ok() } else { parse_item(&items[i]).is_ok() }).collect();
     let (from, to) = (*used.get(from)?, *used.get(to)?);
     let item = items.remove(from);
     items.insert(to, item);
     Some(to_text(&v))
+}
+
+/// What the page knows of the entry at `at` of the list `key` in the settings text, counted as
+/// `with_moved` counts: its name, and for a meter its program, none for a meter of a file. A move
+/// goes by places, and the file may have changed since the page drew them.
+pub fn entry_at(text: &str, key: &str, at: usize) -> Option<(String, Option<String>)> {
+    let (s, _) = parse(text).ok()?;
+    if key == "meters" {
+        let m = s.meters.get(at)?;
+        let program = match &m.source {
+            Source::Program(p) => Some(p.clone()),
+            Source::File(_) => None,
+        };
+        return Some((m.name.clone(), program));
+    }
+    s.items.get(at).map(|it| (it.name.clone(), None))
 }
 
 /// A share of the work area as it is written into the file: 0..1, four decimals.
@@ -687,7 +704,7 @@ pub fn change_file(path: &Path, mut change: impl FnMut(&str) -> Option<String>) 
     let tmp = path.with_extension("json.tmp");
     for _ in 0..3 {
         let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read settings: {e}"))?;
-        let text_now = change(&text).ok_or("the settings file is not a JSON object, so it is left as it is")?;
+        let text_now = change(&text).ok_or("the settings file is not a JSON object, or no longer holds what was to change, so it is left as it is")?;
         std::fs::write(&tmp, text_now).map_err(|e| format!("cannot write settings: {e}"))?;
         if std::fs::read_to_string(path).ok().as_deref() != Some(text.as_str()) {
             continue;
@@ -836,16 +853,45 @@ mod tests {
         };
         let names = |text: &str| parse(text).unwrap().0.items.iter().map(|i| i.name.clone()).collect::<Vec<_>>().join(" ");
         let text = file(&["a", "b", "c", "d"]);
-        assert_eq!(names(&with_moved(&text, 0, 2).unwrap()), "b c a d");
-        assert_eq!(names(&with_moved(&text, 3, 0).unwrap()), "d a b c");
-        assert_eq!(with_moved(&text, 1, 1).unwrap(), text);
+        assert_eq!(names(&with_moved(&text, "items", 0, 2).unwrap()), "b c a d");
+        assert_eq!(names(&with_moved(&text, "items", 3, 0).unwrap()), "d a b c");
+        assert_eq!(with_moved(&text, "items", 1, 1).unwrap(), text);
         // An item the panel skips is not counted and stays where it is in the file
         let text = file(&["a", "broken", "b", "c"]);
-        assert_eq!(with_moved(&text, 0, 2).unwrap(), file(&["broken", "b", "c", "a"]));
-        assert_eq!(with_moved(&text, 2, 0).unwrap(), file(&["c", "a", "broken", "b"]));
+        assert_eq!(with_moved(&text, "items", 0, 2).unwrap(), file(&["broken", "b", "c", "a"]));
+        assert_eq!(with_moved(&text, "items", 2, 0).unwrap(), file(&["c", "a", "broken", "b"]));
         // A place the list does not have, and not a settings file at all
-        assert!(with_moved(&text, 0, 3).is_none());
-        assert!(with_moved("not json", 0, 1).is_none());
+        assert!(with_moved(&text, "items", 0, 3).is_none());
+        assert!(with_moved("not json", "items", 0, 1).is_none());
+    }
+
+    #[test]
+    fn a_meter_is_moved_among_the_meters_the_panel_uses_and_the_items_stay() {
+        let file = |names: &[&str]| {
+            let meters: Vec<Value> = names.iter().map(|n| if *n == "broken" { json!({ "name": n }) } else { json!({ "name": n, "file": format!("D:\\{n}.txt"), "mine": 1 }) }).collect();
+            to_text(&json!({ "note": "mine", "meters": meters, "items": [{ "name": "k", "action": "open", "target": "x" }] }))
+        };
+        let names = |text: &str| parse(text).unwrap().0.meters.iter().map(|m| m.name.clone()).collect::<Vec<_>>().join(" ");
+        let text = file(&["a", "b", "c"]);
+        assert_eq!(names(&with_moved(&text, "meters", 0, 2).unwrap()), "b c a");
+        assert_eq!(names(&with_moved(&text, "meters", 2, 0).unwrap()), "c a b");
+        // The meter takes its file and its own fields along; the items and the rest stay
+        let moved = with_moved(&text, "meters", 0, 1).unwrap();
+        assert_eq!(moved, file(&["b", "a", "c"]));
+        assert_eq!(parse(&moved).unwrap().0.meters[1].source, Source::File("D:\\a.txt".into()));
+        // A meter the panel skips is not counted and stays where it is
+        let text = file(&["a", "broken", "b"]);
+        assert_eq!(with_moved(&text, "meters", 0, 1).unwrap(), file(&["broken", "b", "a"]));
+        assert!(with_moved(&text, "meters", 0, 2).is_none());
+        // The entry at a place, as the page knows it, counted the same way: a meter added in front
+        // since the page drew the list is not the one it carried
+        assert_eq!(entry_at(&text, "meters", 1), Some(("b".into(), None)));
+        let program = to_text(&json!({ "meters": [{ "name": "x", "program": "C:\\x.exe" }, { "name": "a", "file": "D:\\a.txt" }], "items": [{ "name": "k", "action": "open", "target": "x" }] }));
+        assert_eq!(entry_at(&program, "meters", 0), Some(("x".into(), Some("C:\\x.exe".into()))));
+        assert_ne!(entry_at(&program, "meters", 0), Some(("a".into(), None)));
+        assert_eq!(entry_at(&program, "items", 0), Some(("k".into(), None)));
+        assert_eq!(entry_at(&program, "meters", 2), None);
+        assert_eq!(entry_at("not json", "meters", 0), None);
     }
 
     #[test]

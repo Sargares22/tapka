@@ -57,8 +57,8 @@ for (const [theme, accent] of [['dark', '#8ab4ff'], ['light', '#ff8a3d']]) {
   shoot('index.html', 'lost-' + theme, '348,340', { get_view: lostView }, box + hoverLost);
   // With meters under the keys, at the three sizes and at the top edge: a program at 42 %, one
   // past 80 %, a file with nothing in it; the key of the first program has its ring. The pill is
-  // as long as layout.rs makes it for six keys and three meters: four keys and the peek, every meter
-  const metered = { ...view, items: items.map((it, i) => ({ ...it, ring: i === 3 ? 0 : null })), pill: [489, 571], room: [390, 390], divider: null,
+  // as long as layout.rs makes it for six keys and three meters: four whole keys, every meter
+  const metered = { ...view, items: items.map((it, i) => ({ ...it, ring: i === 3 ? 0 : null })), pill: [471, 553], room: [372, 372], divider: null,
     meters: [{ name: 'Notes', icon: null, target: 'D:/Tools/notes.exe', value: 42 }, { name: 'Render', icon: null, target: 'D:/Tools/render.exe', value: 86 }, { name: 'backup', icon: null, target: null, value: null }] };
   for (const scale of [0.8, 1, 1.25]) {
     const zoom = `<style>html,body{width:348px!important;height:513px!important}body{position:relative;zoom:${scale}}</style>`;
@@ -85,7 +85,7 @@ for (const [theme, accent] of [['dark', '#8ab4ff'], ['light', '#ff8a3d']]) {
   shoot('index.html', 'meters-due-' + theme, '348,513', { get_view: due }, tall + hoverAt(1));
   // Stretched to eight cells with three keys and two meters: the capsule ends with them, no empty
   // cells (handle 44, keys 162, line 14, meters 104, foot 41)
-  const short = { ...view, items: items.slice(0, 3), length: 8, pill: [365, 447], room: [536, 536], divider: null, meters: metered.meters.slice(0, 2) };
+  const short = { ...view, items: items.slice(0, 3), length: 8, pill: [365, 447], room: [266, 266], divider: null, meters: metered.meters.slice(0, 2) };
   shoot('index.html', 'length-content-' + theme, '348,513', { get_view: short }, tall);
   shoot('index.html', 'length-content-signs-' + theme, '348,513', { get_view: short }, tall + "<script>setTimeout(()=>{const p=document.querySelector('#keys > .item.add'),r=p.getBoundingClientRect(),at=t=>new PointerEvent(t,{bubbles:true,pointerId:1,pointerType:'touch',clientX:r.left+r.width/2,clientY:r.top+r.height/2});p.dispatchEvent(at('pointerdown'));window.dispatchEvent(at('pointerup'))},100)</script>");
   // A key without a meter whose program shows progress on the taskbar

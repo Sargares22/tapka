@@ -828,6 +828,8 @@ const carrying = `(async () => {
   out.during = shifts();
   window.dispatchEvent(at('pointerup', y2)); await sleep(200);
   out.moved = moves(); out.tapsAfterCarry = taps(); out.kept = shifts();
+  // The key goes with its name, so Rust moves nothing if the file has another there by now
+  out.movedName = [window.__calls.filter(c => c[0] === 'move_item').map(c => c[1].name), window.__view.items[0].name];
   // Rust saved the order and says so: the keys are drawn anew, nothing is left shifted
   window.__view = { ...window.__view, items: [1, 2, 0, 3, 4].map(i => window.__view.items[i]) };
   window.__on.reload(); await sleep(50);
@@ -851,6 +853,8 @@ test('a key held and then moved is carried to another place, and the order goes 
   // The carried key is two cells down, the two it passed are one cell up, the rest stand still
   assert.deepEqual(cr.during, [108, -54, -54, 0, 0]);
   assert.deepEqual(cr.moved, [[0, 2]]);
+  assert.deepEqual(cr.movedName, [[cr.movedName[1]], cr.movedName[1]]);
+  assert.ok(cr.movedName[1]);
   assert.equal(cr.tapsAfterCarry, 0);
   assert.deepEqual(cr.kept, [108, -54, -54, 0, 0]);
   assert.deepEqual(cr.after, [0, 0, 0, 0, 0]);
@@ -976,20 +980,30 @@ const meterScript = `(async () => {
   // Back to the values the rest of this run goes by: one number each
   window.__on.meters({ payload: { generation: 1, values: [rd(80), null] } });
   out.ringGone = ms.map(outerShown);
+  // Four meters, two of them files with nothing to show, in 260 px of room, less than all of them
+  // need: the pill (359 px) is the handle, the line, the foot and that room, wherever the line stands
+  const empty = name => ({ name, icon: null, target: null, value: null });
+  window.__view = { ...window.__view, room: [260, 260], pill: [359, 441], meters: [...window.__view.meters, empty('third'), empty('fourth')] };
+  window.__on.reload(); await sleep(50);
   // The parts as they stand: the three keys whole, the meters in what is left, the pill as Rust said
   const heights = () => [Math.round(q('#list').getBoundingClientRect().height), Math.round(q('#meters').getBoundingClientRect().height), Math.round(q('#pill').getBoundingClientRect().height)];
   out.parts = heights();
-  // The divider follows the finger up: the keys scroll in less, the meters grow to all of them, and
-  // past that the pill is shorter, with nothing empty below the meters. Down, it stops under the
-  // last key, and the meters give up room. Let go, its place goes to Rust
+  // The divider follows the finger a whole key at a time, to the key nearest the finger: up, the
+  // keys scroll in less and the meters grow, down to one key; down, it stops under the last key.
+  // The pill keeps its length all along. Let go, its place goes to Rust
   const list = q('#list'), d = q('#divider'), r = d.getBoundingClientRect();
   const pull = (y, type) => d.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 3, pointerType: 'touch', clientX: r.left + 20, clientY: y }));
   pull(r.top + 7, 'pointerdown'); pull(r.top - 13, 'pointermove');
   out.up20 = heights();
   pull(r.top - 53, 'pointermove');
   out.up60 = heights();
+  pull(r.top - 93, 'pointermove');
+  out.up100 = heights();
   pull(r.top + 47, 'pointermove');
   out.down40 = heights();
+  // At every step of a pull the keys' part is whole keys and the pill as long
+  out.steps = [];
+  for (let y = r.top - 200; y <= r.top + 100; y += 9) { pull(y, 'pointermove'); out.steps.push(heights()); }
   pull(r.top - 53, 'pointermove');
   out.sentWhilePulled = window.__calls.filter(c => c[0] === 'set_divider').length;
   // The settings are read again while the line is pulled: the drawing waits for the release, and
@@ -998,7 +1012,7 @@ const meterScript = `(async () => {
   const flex = list.style.flex, viewsBefore = views();
   window.__on.reload(); await sleep(50);
   out.keptWhilePulled = [list.style.flex === flex, views() - viewsBefore];
-  window.__view = { ...window.__view, divider: 102 / 240, pill: [305, 387] };
+  window.__view = { ...window.__view, divider: 104 / 260 };
   pull(r.top - 53, 'pointerup'); await sleep(50);
   out.drawnAfter = [views() - viewsBefore, q('#list').style.flex === flex, heights()];
   out.sent = window.__calls.filter(c => c[0] === 'set_divider').map(c => c[1].at);
@@ -1031,7 +1045,54 @@ const meterScript = `(async () => {
   const first = document.querySelector('.meter');
   fire(first, 'pointerdown'); await sleep(450); out.held = card(); fire(first, 'pointerup'); out.released = card();
   out.tapsAfter = window.__calls.filter(c => c[0] === 'tap').length;
-  // The place saved in the settings file is where the divider stands after a start
+  // A press shows the label at once, not after the hold; the release leaves it up a while, and a
+  // scroll of the meters takes it away
+  const gm = () => [...document.querySelectorAll('.meter')];
+  q('#meters').scrollTop = 0; await sleep(50);
+  fire(gm()[1], 'pointerdown'); out.atPress = card();
+  fire(gm()[1], 'pointerup'); out.afterRelease = card();
+  q('#meters').scrollTop = 20; q('#meters').dispatchEvent(new Event('scroll'));
+  out.afterScroll = card();
+  q('#meters').scrollTop = 0; await sleep(50);
+  // A tap on a meter of a program shows its label and still opens the program
+  const opens = opened().length;
+  fire(gm()[0], 'pointerdown'); fire(gm()[0], 'pointerup');
+  out.tapOpens = [opened().length - opens, card()];
+  // Held and then moved, a meter is carried along the meters: the label goes, the meter it passes
+  // steps aside, and the release sends the places to Rust; it opens nothing
+  const base = gm()[0].getBoundingClientRect();
+  const at = (el, type, dy, id = 5, pointerType = 'touch') => { const r = base; el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: id, pointerType, clientX: r.left + 20, clientY: r.top + 20 + dy })); };
+  const moves = () => window.__calls.filter(c => c[0] === 'move_meter').map(c => [c[1].from, c[1].to]);
+  const opensAtHold = opened().length;
+  at(gm()[0], 'pointerdown', 0); await sleep(450);
+  at(gm()[0], 'pointermove', 30); at(gm()[0], 'pointermove', 56);
+  out.carrying = { carried: gm()[0].classList.contains('carried'), card: card(), aside: gm()[1].style.transform };
+  at(gm()[0], 'pointerup', 56); await sleep(50);
+  out.moved = [moves(), opened().length - opensAtHold];
+  out.movedWith = window.__calls.filter(c => c[0] === 'move_meter').map(c => [c[1].name, c[1].target]);
+  window.__on.reload(); await sleep(50);
+  // At the start of the meters a finger that moves towards it scrolls nothing, and the label stays;
+  // the cursor Rust reports meanwhile leaves the pressed meter's label alone too
+  q('#meters').scrollTop = 0; q('#meters').dispatchEvent(new Event('scroll'));
+  at(gm()[0], 'pointerdown', 0, 7); at(gm()[0], 'pointermove', 30, 7);
+  out.endKept = [card() && card()[0], q('#meters').scrollTop];
+  at(gm()[0], 'pointerup', 30, 7);
+  // A mouse press: the cursor Rust reports moves meanwhile
+  at(gm()[0], 'pointerdown', 0, 8, 'mouse');
+  const mid = el => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+  out.hoverOver = [document.elementFromPoint(...mid(gm()[0]))?.closest('.meter') === gm()[0], document.elementFromPoint(...mid(gm()[1]))?.closest('.meter') === gm()[1]];
+  window.__on.hover({ payload: mid(gm()[0]) }); window.__on.hover({ payload: mid(gm()[1]) });
+  out.hoverKept = card() && card()[0];
+  at(gm()[0], 'pointerup', 0, 8, 'mouse');
+  out.hoverAfter = card() && card()[0];
+  window.__on.hover({ payload: null });
+  // A finger that moves before the hold scrolls the meters and carries nothing
+  at(gm()[0], 'pointerdown', 0, 6); at(gm()[0], 'pointermove', -30, 6); await sleep(450); at(gm()[0], 'pointermove', -60, 6);
+  out.scrolledNotCarried = [gm()[0].classList.contains('carried'), q('#meters').scrollTop > 0];
+  at(gm()[0], 'pointerup', -60, 6); await sleep(50);
+  out.movesAfterScroll = moves().length;
+  // The place saved in the settings file is where the divider stands after a start, on the key
+  // nearest to it
   window.__view = { ...window.__view, divider: 0.25 }; window.__on.reload(); await sleep(50);
   out.restored = [q('#list').style.flex, q('#meters').style.flex];
   // A place in the file that would leave a part less than one key or meter, or more than its keys,
@@ -1043,7 +1104,7 @@ const meterScript = `(async () => {
   // ...nor a list that grows under a pulled line
   window.__view = { ...window.__view, meters: [...window.__view.meters, { name: 'third', icon: null, target: null, value: 3 }] }; window.__on.reload(); await sleep(50);
   out.grownList = heights();
-  window.__view = { ...window.__view, divider: 0.25, meters: window.__view.meters.slice(0, 2) }; window.__on.reload(); await sleep(50);
+  window.__view = { ...window.__view, divider: 0.25, meters: window.__view.meters.slice(0, 2), room: [240, 240], pill: [339, 421] }; window.__on.reload(); await sleep(50);
   // A file not updated for longer than it allows: grey with its last percent, and its label says how
   // long ago and when it resets; a file with nothing in it is grey with no percent and says so
   window.__view = { ...window.__view, divider: null }; window.__on.reload(); await sleep(50);
@@ -1080,17 +1141,17 @@ const meterScript = `(async () => {
   window.__on.meters({ payload: { generation: 1, readings: 7, values: [{ value: 82, outer: null, hint: [], stale: false, notes: [] }, null] } });
   out.newEvent = pct();
   window.__on.reload(); await sleep(50);
-  // The press of the divider asks Rust for the room of the longest pill at once, a release without
-  // a move gives it back; a moved release saves, which sizes the window
+  // The pill keeps its length, so a press of the divider asks Rust for nothing and a release
+  // without a move saves nothing; a moved release saves the place
   const dv = q('#divider'), dr = dv.getBoundingClientRect();
   const press = (type, y) => dv.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 4, pointerType: 'touch', clientX: dr.left + 20, clientY: y }));
-  const before = window.__calls.filter(c => c[0] === 'divider').length;
-  const asked = () => window.__calls.filter(c => c[0] === 'divider').slice(before).map(c => c[1].pulled);
-  const saves = window.__calls.filter(c => c[0] === 'set_divider').length;
-  press('pointerdown', dr.top + 7); out.pressed = asked();
-  press('pointerup', dr.top + 7); out.still = asked();
+  const sentSince = n => window.__calls.slice(n).map(c => c[0]).filter(c => c !== 'get_view' && c !== 'card');
+  let callsBefore = window.__calls.length;
+  press('pointerdown', dr.top + 7); out.pressed = sentSince(callsBefore);
+  press('pointerup', dr.top + 7); out.still = sentSince(callsBefore);
+  callsBefore = window.__calls.length;
   press('pointerdown', dr.top + 7); press('pointermove', dr.top - 13); press('pointerup', dr.top - 13); await sleep(50);
-  out.movedRelease = [asked(), window.__calls.filter(c => c[0] === 'set_divider').length - saves];
+  out.movedRelease = sentSince(callsBefore);
   // At the top edge the meters lie in a row after the keys
   window.__view = { ...window.__view, edge: 'top' }; window.__on.reload(); await sleep(50);
   const m2 = [...document.querySelectorAll('.meter')].map(m => m.getBoundingClientRect());
@@ -1106,6 +1167,67 @@ const meterScript = `(async () => {
 })();`;
 const mt = found(renderedDom(items, meterScript, 6000));
 
+// Every count from one key to ten and from one meter to ten, in rooms of three, seven and as many
+// cells as all of them need, cut as layout.rs cuts them (`room`): wherever the line is pulled, the
+// meters' part is whole meters, one or more and no more than all of them, the keys a key's cell or
+// more and no more than all of them, and the pill keeps its length
+const sweepScript = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const q = s => document.querySelector(s);
+  const h = s => Math.round(q(s).getBoundingClientRect().height);
+  const out = { configs: 0, checked: 0, bad: [] };
+  const room = (n, m, cells) => {
+    const r = Math.min(cells * 54, n * 54 + m * 52);
+    for (let j = m; j >= 1; j--) if (r >= j * 52 + 54) return Math.min(r, j * 52 + n * 54);
+    return r;
+  };
+  for (let n = 1; n <= 10; n++) for (let m = 1; m <= 10; m++) for (const cells of [3, 7, 99]) {
+    const r = room(n, m, cells);
+    window.__view = { ...window.__view, items: Array.from({ length: n }, (_, at) => ({ at, name: 'K' + at, icon: null })), divider: null, length: cells, generation: 1,
+      room: [r, r], pill: [99 + r, 181 + r], meters: Array.from({ length: m }, (_, i) => ({ name: 'M' + i, icon: null, target: null, value: 10 })) };
+    window.__on.reload(); await sleep(5);
+    const d = q('#divider'), top = d.getBoundingClientRect().top;
+    const pull = (type, y) => d.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 9, pointerType: 'touch', clientX: 20, clientY: y }));
+    pull('pointerdown', top + 7);
+    out.configs++;
+    const seen = new Set();
+    for (let y = -700; y <= 700; y += 26) {
+      pull('pointermove', top + 7 + y);
+      const [k, mm, p] = [h('#list'), h('#meters'), h('#pill')];
+      out.checked++;
+      seen.add(mm / 52);
+      const ok = p === 99 + r && mm % 52 === 0 && mm >= 52 && mm <= m * 52 && k >= 54 && k <= n * 54 && k + mm === r;
+      if (!ok && out.bad.length < 5) out.bad.push([n, m, cells, y, k, mm, p, r]);
+    }
+    // Every number of meters from the fewest to the most is a place of the line, and the most is all
+    // of them whenever the room has a key's cell besides
+    const js = [...seen].sort((a, b) => a - b), most = js[js.length - 1];
+    if ((js.some((j, i) => i && j !== js[i - 1] + 1) || (r >= 54 + m * 52 && most !== m)) && out.bad.length < 5) out.bad.push([n, m, cells, 'places', js.join(' '), r]);
+    pull('pointercancel', top);
+    await sleep(5);
+  }
+  // The owner's capsule: eight keys and three meters in eight cells, the line saved low with one
+  // meter showing; pulled up, it shows two, then all three whole
+  window.__view = { ...window.__view, items: Array.from({ length: 8 }, (_, at) => ({ at, name: 'K' + at, icon: null })), divider: 0.9, length: 8,
+    room: [432, 432], pill: [531, 613], meters: Array.from({ length: 3 }, (_, i) => ({ name: 'M' + i, icon: null, target: null, value: 10 })) };
+  window.__on.reload(); await sleep(5);
+  const d = q('#divider'), top = d.getBoundingClientRect().top;
+  const pull = (type, y) => d.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 9, pointerType: 'touch', clientX: 20, clientY: y }));
+  out.owner = [[h('#list'), h('#meters')]];
+  pull('pointerdown', top + 7);
+  for (const up of [52, 104]) { pull('pointermove', top + 7 - up); out.owner.push([h('#list'), h('#meters'), h('#pill')]); }
+  pull('pointercancel', top);
+  document.documentElement.dataset.check = JSON.stringify(out);
+})();`;
+const sweep = found(renderedDom([], sweepScript, 30000));
+
+test('for any count of keys and meters the line moves a whole meter at a time, up to all of them, and the pill keeps its length', () => {
+  assert.equal(sweep.configs, 10 * 10 * 3);
+  // The owner's eight keys and three meters: up from one meter to two, then all three whole
+  assert.deepEqual(sweep.owner, [[380, 52], [328, 104, 531], [276, 156, 531]]);
+  assert.deepEqual(sweep.bad, []);
+});
+
 test('story 38: the meters show under the keys behind a line, only when there are meters', () => {
   assert.deepEqual(mt.plain, [false, false, 0, '']);
   assert.deepEqual(mt.block, { divider: true, meters: 2, pct: ['42%', '—'], none: [false, true], letters: ['R', 'B'], below: true, foot: true });
@@ -1120,28 +1242,33 @@ test('story 38: the meters show under the keys behind a line, only when there ar
   assert.deepEqual(mt.gone, [false, false, 0, '']);
 });
 
-test('story 38: the line is pulled to share the room, its place goes to Rust and comes back', () => {
-  // Three keys whole (162) and the meters in the rest of the 240 px, as layout.rs shares it
-  assert.deepEqual(mt.parts, [162, 78, 339]);
-  // Up: the meters grow to both (104), then the pill is shorter, nothing empty under them
-  assert.deepEqual(mt.up20, [142, 98, 339]);
-  assert.deepEqual(mt.up60, [102, 104, 305]);
-  // Down: the line stops under the third key, no empty cell below it
-  assert.deepEqual(mt.down40, [162, 78, 339]);
+test('story 38: the line moves a whole meter at a time in a pill of one length, and its place goes to Rust and comes back', () => {
+  // Three of the four meters whole (156) and the keys in the rest of the 260 px, as layout.rs shares it
+  assert.deepEqual(mt.parts, [104, 156, 359]);
+  // Up: as many meters as leave a key's cell already show, nothing moves
+  assert.deepEqual(mt.up20, [104, 156, 359]);
+  assert.deepEqual(mt.up60, [104, 156, 359]);
+  assert.deepEqual(mt.up100, [104, 156, 359]);
+  // Down: one meter fewer, and no further: the keys would leave room empty after the third
+  assert.deepEqual(mt.down40, [156, 104, 359]);
+  // At every step the meters' part is whole meters, one at least, the keys a key's cell to all of them, the pill as long
+  for (const [k, m, p] of mt.steps) {
+    assert.ok(m % 52 === 0 && m >= 52 && k >= 54 && k <= 162 && p === 359, String([k, m, p]));
+  }
   assert.equal(mt.sentWhilePulled, 0);
   assert.deepEqual(mt.keptWhilePulled, [true, 0]);
-  assert.deepEqual(mt.drawnAfter, [1, true, [102, 104, 305]]);
+  assert.deepEqual(mt.drawnAfter, [1, true, [104, 156, 359]]);
   assert.equal(mt.sent.length, 1);
-  assert.ok(Math.abs(mt.sent[0] - 102 / 240) < 1e-9, String(mt.sent[0]));
-  // Pulled as far as it goes, or restored from the file, or with more meters than before, each
-  // part keeps one whole key (54) or meter (52), and the keys' part no more than its keys
-  assert.ok(mt.meterRoom >= 52, String(mt.meterRoom));
-  assert.ok(mt.keyRoom >= 54, String(mt.keyRoom));
+  assert.ok(Math.abs(mt.sent[0] - 104 / 260) < 1e-9, String(mt.sent[0]));
+  // Pulled as far as it goes either way
+  assert.equal(mt.meterRoom, 104);
+  assert.equal(mt.keyRoom, 104);
   assert.equal(mt.taps, 0);
-  assert.deepEqual(mt.restored, ['0 0 60px', '0 0 104px']);
-  assert.deepEqual(mt.restoredLow.slice(0, 2), [54, 104]);
-  assert.deepEqual(mt.restoredHigh.slice(0, 2), [162, 78]);
-  assert.deepEqual(mt.grownList.slice(0, 2), [162, 78]);
+  // Restored from the file on the nearest meter, or with more meters than before: the same rule
+  assert.deepEqual(mt.restored, ['0 0 104px', '0 0 156px']);
+  assert.deepEqual(mt.restoredLow, [104, 156, 359]);
+  assert.deepEqual(mt.restoredHigh, [156, 104, 359]);
+  assert.deepEqual(mt.grownList, [156, 104, 359]);
 });
 
 test('a stale meter is grey with its last percent and says how old it is; one with no data says so', () => {
@@ -1163,10 +1290,10 @@ test('a drawing copied before the newest values does not put old ones back', () 
   assert.equal(mt.newEvent, '82%');
 });
 
-test('a press of the divider reserves the window for the longest pill, and only the release gives it back', () => {
-  assert.deepEqual(mt.pressed, [true]);
-  assert.deepEqual(mt.still, [true, false]);
-  assert.deepEqual(mt.movedRelease, [[true, false, true], 1]);
+test('the divider asks Rust for no room: only a moved release goes to Rust, as the place to save', () => {
+  assert.deepEqual(mt.pressed, []);
+  assert.deepEqual(mt.still, []);
+  assert.deepEqual(mt.movedRelease, ['set_divider']);
 });
 
 test('story 38: a tap on a meter opens its program, and a held meter shows its name and percent', () => {
@@ -1178,8 +1305,33 @@ test('story 38: a tap on a meter opens its program, and a held meter shows its n
   assert.deepEqual(mt.waitWhilePressed, [0, true]);
   assert.deepEqual(mt.drawnAfterRelease, [1, 2]);
   assert.deepEqual(mt.held, ['Render', '80%']);
-  assert.equal(mt.released, null);
+  // The label stays a while after the release
+  assert.deepEqual(mt.released, ['Render', '80%']);
   assert.equal(mt.tapsAfter, 0);
+  assert.deepEqual(mt.tapOpens, [1, ['Render', '80%']]);
+});
+
+test('a press of a meter shows its label at once; it stays after the release and goes with a scroll', () => {
+  // A finger move that scrolls nothing, and the cursor moving meanwhile, leave the label up
+  assert.deepEqual(mt.endKept, ['Render', 0]);
+  assert.deepEqual(mt.hoverOver, [true, true]);
+  assert.equal(mt.hoverKept, 'Render');
+  assert.equal(mt.hoverAfter, 'Render');
+  assert.deepEqual(mt.atPress, ['backup', 'нет данных']);
+  assert.deepEqual(mt.afterRelease, ['backup', 'нет данных']);
+  assert.equal(mt.afterScroll, null);
+});
+
+test('a held meter is carried along the meters and the release saves the new order', () => {
+  // The meter follows the finger, the one it passes steps up a meter, the label is gone
+  assert.deepEqual(mt.carrying, { carried: true, card: null, aside: 'translateY(-52px)' });
+  // Rust gets the places in the settings' list of meters; nothing is opened
+  assert.deepEqual(mt.moved, [[[0, 1]], 0]);
+  // ...with the meter as it was drawn, which Rust checks against the file before it moves anything
+  assert.deepEqual(mt.movedWith, [['Render', 'D:/Tools/render.exe']]);
+  // Moved before the hold, the finger scrolls and carries nothing
+  assert.deepEqual(mt.scrolledNotCarried, [false, true]);
+  assert.equal(mt.movesAfterScroll, 1);
 });
 
 test('story 39: a file of two numbers rings its meter, its lines of hint show in the label', () => {
@@ -1330,6 +1482,9 @@ test('story 45: after the card adds keys the capsule says to tap one, until a ta
 // 401 with the two signs and the grip; stretched with the signs, 185 px and 54 a cell, and the
 // grip may go from two cells to seven (`reach`).
 const reachOf = cells => cells.map(c => [c, 185 + 54 * c]);
+// The same eight keys with two meters, as layout.rs has them with the signs: a length is cells for
+// the keys and the meters together, 54 px each, up to the 536 px all of them take at ten cells
+const meteredReach = [2, 3, 4, 5, 6, 7, 8, 9, 10].map(c => [c, 181 + Math.min(54 * c, 536), Math.min(54 * c, 536)]);
 const stretchScript = `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const out = {};
@@ -1411,7 +1566,7 @@ const stretchScript = `(async () => {
   out.dropped = [grip().classList.contains('pulled'), calls('set_length').length - sentAtDrop, views() - viewsAtDrop];
   // Shortened with the meters and the divider pulled far to the keys: each part keeps one whole key
   // or meter while the grip is dragged
-  window.__view = { ...window.__view, length: 6, pill: [545, 627], divider: 0.9, generation: 1, reach: ${JSON.stringify([2, 3, 4, 5, 6, 7].map(c => [c, 185 + 54 * c + 118]))},
+  window.__view = { ...window.__view, length: 6, pill: [423, 505], room: [324, 324], divider: 0.9, generation: 1, reach: ${JSON.stringify(meteredReach)},
     meters: [{ name: 'Render', icon: null, target: 'D:/Tools/render.exe', value: 42 }, { name: 'backup', icon: null, target: null, value: null }] };
   window.__on.reload(); await sleep(50);
   [x, y] = mid(grip());
@@ -1419,13 +1574,21 @@ const stretchScript = `(async () => {
   out.shortMeters = [long(), Math.round(document.getElementById('list').getBoundingClientRect().height), Math.round(document.getElementById('meters').getBoundingClientRect().height)];
   grip().dispatchEvent(at('pointerup', x, y - 216)); await sleep(50);
   out.shortSaved = calls('set_length').pop().cells;
-  // The length in the file shares the room with the meters: six cells and the peek against two meters
-  window.__view = { ...window.__view, length: 6, pill: [545, 627], divider: null, generation: 1, reach: ${JSON.stringify(reachOf([2, 3, 4, 5, 6, 7]))},
+  // The length in the file shares the room with the meters: six cells against two meters
+  window.__view = { ...window.__view, length: 6, pill: [423, 505], room: [324, 324], divider: null, generation: 1, reach: ${JSON.stringify(meteredReach)},
     meters: [{ name: 'Render', icon: null, target: 'D:/Tools/render.exe', value: 42 }, { name: 'backup', icon: null, target: null, value: null }] };
   window.__on.reload(); await sleep(50);
   out.restored = [long(), Math.round(document.getElementById('list').getBoundingClientRect().height), Math.round(document.getElementById('meters').getBoundingClientRect().height)];
+  // Dragged as far as it goes: the last step shows all eight keys and both meters whole
+  if (!grip()) tap(plus());
+  [x, y] = mid(grip());
+  grip().dispatchEvent(at('pointerdown', x, y)); grip().dispatchEvent(at('pointermove', x, y + 400));
+  out.full = [long(), Math.round(document.getElementById('list').getBoundingClientRect().height), Math.round(document.getElementById('meters').getBoundingClientRect().height)];
+  grip().dispatchEvent(at('pointerup', x, y + 400)); await sleep(50);
+  out.fullSaved = calls('set_length').pop().cells;
+  window.__view = { ...window.__view, room: null };
   // At the top edge the grip is at the right end and is dragged sideways
-  window.__view = { ...window.__view, edge: 'top', meters: [], length: null, pill: [319, 401] };
+  window.__view = { ...window.__view, edge: 'top', meters: [], length: null, pill: [319, 401], reach: ${JSON.stringify(reachOf([2, 3, 4, 5, 6, 7]))} };
   window.__on.reload(); await sleep(50);
   if (!grip()) tap(plus());
   const t = grip().getBoundingClientRect(), q = pill.getBoundingClientRect();
@@ -1581,10 +1744,9 @@ test('a drag Rust ends is dropped without a save and the capsule is drawn anew',
   assert.deepEqual(st.dropped, [false, 0, 1]);
 });
 
-test('shortened over the meters, the keys and the meters each keep one whole cell while dragged', () => {
-  // Two cells and the peek with two meters: 411 px with the signs
-  assert.equal(st.shortMeters[0], 411);
-  assert.ok(st.shortMeters[1] >= 54 && st.shortMeters[2] >= 52, String(st.shortMeters));
+test('shortened over the meters, the meters keep one whole meter and the keys at least one key cell while dragged', () => {
+  // Two cells with two meters: 289 px with the signs, one whole meter and the keys in the rest
+  assert.deepEqual(st.shortMeters, [289, 56, 52]);
   assert.equal(st.shortSaved, 2);
 });
 
@@ -1613,9 +1775,15 @@ test('a finger starts the drag anywhere in the grip, a strip as large as the han
 });
 
 test('the length from the file draws the capsule and shares the room with the meters', () => {
-  // The signs are still up: the pill with them; of its 446 px of room both meters take what they
-  // need, the keys the rest
-  assert.deepEqual(st.restored, [627, 342, 104]);
+  // The signs are still up: the pill with them; of its six cells of room both meters take theirs
+  // and the keys scroll in the rest
+  assert.deepEqual(st.restored, [505, 220, 104]);
+});
+
+test('the end grip reaches the length that shows every key and meter whole', () => {
+  // Ten cells: all eight keys (432) and both meters (104), nothing cut, and that length is saved
+  assert.deepEqual(st.full, [717, 432, 104]);
+  assert.equal(st.fullSaved, 10);
 });
 
 // ---------- the settings window

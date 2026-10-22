@@ -14,21 +14,21 @@ paths inside tapka-setup. Claude Code uses ~/.claude/skills/tapka-setup; Codex u
 
 Otherwise, fetch SKILL.md and follow its steps. Read each reference when its step calls for it.
 
-Files of release v1.4.0:
+Files of release v1.4.1:
 
 - tapka-setup/SKILL.md
-  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/SKILL.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.1/.agents/skills/tapka-setup/SKILL.md
 - tapka-setup/references/install.md
-  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/install.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.1/.agents/skills/tapka-setup/references/install.md
 - tapka-setup/references/find.md
-  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/find.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.1/.agents/skills/tapka-setup/references/find.md
 - tapka-setup/references/settings.md
-  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/settings.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.1/.agents/skills/tapka-setup/references/settings.md
 - tapka-setup/references/meters.md
-  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/meters.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.1/.agents/skills/tapka-setup/references/meters.md
 - tapka-setup/references/verify.md
-  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/references/verify.md
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.1/.agents/skills/tapka-setup/references/verify.md
 - tapka-setup/scripts/candidates.ps1
-  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/scripts/candidates.ps1
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.1/.agents/skills/tapka-setup/scripts/candidates.ps1
 - tapka-setup/scripts/capsule.ps1
-  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.0/.agents/skills/tapka-setup/scripts/capsule.ps1
+  https://raw.githubusercontent.com/Sargares22/tapka/v1.4.1/.agents/skills/tapka-setup/scripts/capsule.ps1

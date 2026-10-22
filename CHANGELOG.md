@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.1 (2026-10-22)
+
+- The capsule keeps its length while you drag the line between keys and gauges: only the bar at the far end changes it. The line moves one whole gauge at a time: drag it up to show one more gauge, down to one fewer. Every gauge can be shown whole as long as one key still fits; the keys scroll in the rest.
+- The bar at the far end now stretches the capsule until every key and every gauge shows whole, whatever their number; the length counts the keys and the gauges together.
+- Opening *+* near the end of the screen no longer makes the capsule shorter: it grows as far as the screen lets it.
+- A press on a gauge shows its label at once, and the label stays a few seconds after you let go. Hold a gauge and drag it to put the gauges in another order, the way you reorder keys.
+
 ## 1.4.0 (2026-10-21)
 
 - Meters: a block of small gauges under the keys, rounded squares of the keys' look whose outline fills from the middle of the top, behind a thin line you drag to share the capsule between keys and gauges. A gauge follows a program you pick from the installed ones (the progress Windows shows on its taskbar button, a progress bar in its windows, or a percent at the start of its title) or a number in a text file. A tap on a gauge works like a key of its program: it opens the program, brings it forward, or folds it away when it is in front.

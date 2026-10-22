@@ -31,8 +31,8 @@ Tapka is one binary, two pages and one settings file. Rust + Tauri 2 + WebView2.
   which the meter's label shows under its percent, and lines of **times**: when its writer last read
   the numbers, how long they stay fresh, when they reset. A meter of a file older than it allows is
   **stale**: grey, with its last percent. The keys and
-  the meters are parted by the **divider**, a thin line pulled to share the room between them
-  (`divider`, the share of the room where the keys' part ends). A meter of a program may also carry `app`, the id the
+  the meters are parted by the **divider**, a thin line pulled to share the room between them a
+  whole meter at a time (`divider`, the share of the room where the keys' part ends). A meter of a program may also carry `app`, the id the
   program gives its windows. A key whose program has a meter shows it as a **ring**
   along its rim. A key of an `open` item without a meter gets the same ring, a **rim**, while its
   program shows progress on its taskbar button, with no setting at all.
@@ -109,9 +109,10 @@ marks of running programs separately (`marks`).
 sizes the window, cuts it with `apply_region`, and puts the handle window of `src/grab.rs`
 over the handle, or over the folded key. A carry ends in `carry_end`, which writes the edge
 and the place to the settings file: `top` for the capsule, `folded_at` for the folded key.
-The capsule may be as long as its keys, up to four, and all its meters, or `length` key cells and the
-room of two meters (`layout::room_for`), and is never longer than its keys and meters need: `layout::parts`
-shares that room between them, neither part longer than what it holds, and the pill ends with them. While the signs are open the window is as long as the most cells from the
+The capsule may be as long as its keys, up to four, and all its meters, or `length` cells for the keys
+and the meters together (`layout::room_for`), and is never longer than its keys and meters need (`layout::room`).
+Where the divider stands does not change the length: `layout::parts` shares that room, the meters a
+whole number of meters, one or more and no more than all of them, the keys the rest, a key's cell or more. While the signs are open the window is as long as the most cells from the
 pill's start that `layout::reach` gives (`stretched`), its region the whole strip. A press on the
 end grip calls `resize` (`start`). The page draws the pill as long as `reach` of `get_view` says for
 the cells the pointer is at, from its own pointer events or, for the mouse, the cursor Rust reports
@@ -150,13 +151,13 @@ meter whose program's button has progress (matched as a meter's program, with th
 menu knows the exe gives its windows, `start_menu_ids`), kept in `rims` by target; a change of them, or
 of the list of items, goes to the page as the event `rims`: the age of the items (`items_age`) and
 `[place, percent]` per item. `get_view` gives each item its `rim` and the page the `age` of the
-list it draws; the page drops an event of another age. The programs' own windows are never asked for a rim. A press on the divider calls `divider`, which
-gives the window and its region room for the longest pill any place of the line makes (`pulling`,
-`layout::held`, the pill's start held still); letting it go after a move calls `set_divider`, which writes
-`divider` and sizes the window for the pill as the parts now make it; a tap on a meter of a program calls `open_meter` with the meter's place, name and
+list it draws; the page drops an event of another age. The programs' own windows are never asked for a rim. Letting the divider go after a move calls
+`set_divider`, which writes `divider`; the window does not change; a tap on a meter of a program calls `open_meter` with the meter's place, name and
 program, which does what a tap on a key of the program does: it opens the program, brings it
-forward, or folds it away when it is in front. The settings window writes the list with
-`save_meters`.
+forward, or folds it away when it is in front. A meter held and carried to another place calls
+`move_meter` with the two places in the settings' list of meters and the meter's name and program
+(`config::with_moved`, as `move_item` for the keys, which sends the key's name); the reload keeps the values read so far with their meters
+(`meters::Values::renew`). The settings window writes the list with `save_meters`.
 
 **Docking.** In the same half-second loop, while the capsule is shown, open and not carried,
 `follow_docked` in `src/main.rs` finds the window of each entry of `docked` among those that stay
@@ -240,9 +241,9 @@ when one is missing.
 **Commands of the capsule page:** `get_view` (everything it draws), `tap`, `foot` (the signs
 open or close, so the window is sized), `fold`, `unfold`, `card` (the label opens or closes,
 so the region includes it), `move_item` (a key was carried to another place in the list),
-`open_meter` (a tap on a meter of a program, with the meter's name and program), `divider` (the
-divider is pressed: the window takes room for the longest pill the line can make; or let go without a
-move), `set_divider` (the divider was let go after a move: the window is sized for it), `resize` (the end grip is pressed, moved a cell, or let go without a move; nothing is saved),
+`move_meter` (a meter was carried to another place among the meters),
+`open_meter` (a tap on a meter of a program, with the meter's name and program), `set_divider` (the
+divider was let go after a move: its place goes into the settings file), `resize` (the end grip is pressed, moved a cell, or let go without a move; nothing is saved),
 `set_length` (the end grip was let go: the cells go into the settings file).
 
 **Commands of the settings window** (the welcome window is the same page): `get_settings`, `set_pref`, `save_items`, `save_meters`,

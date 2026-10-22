@@ -423,6 +423,22 @@ impl Values {
         self.values = vec![None; n];
     }
 
+    /// The list `old` became `new`: a new generation, in which each meter of `new` that was on
+    /// `old` keeps what was read for it, wherever it now stands, and the others have nothing yet.
+    pub fn renew<T: PartialEq>(&mut self, old: &[T], new: &[T]) {
+        let mut taken = vec![false; old.len()];
+        let values = new
+            .iter()
+            .map(|meter| {
+                let at = (0..old.len()).find(|&i| !taken[i] && old[i] == *meter)?;
+                taken[at] = true;
+                self.values.get(at).cloned().flatten()
+            })
+            .collect();
+        self.generation += 1;
+        self.values = values;
+    }
+
     pub fn generation(&self) -> u64 {
         self.generation
     }
@@ -938,6 +954,25 @@ mod tests {
         assert_eq!(values.publish(first, &[(0, p(99.0))]), None);
         assert_eq!(values.values(), [None]);
         assert_eq!(values.publish(values.generation(), &[(0, p(5.0)), (3, p(1.0))]), Some(vec![p(5.0)]));
+    }
+
+    #[test]
+    fn a_moved_meter_keeps_its_value_and_a_late_read_of_the_old_order_is_dropped() {
+        let p = |v: f64| Some(Reading::percent(v));
+        let mut values = Values::default();
+        values.reset(3);
+        let old = values.generation();
+        values.publish(old, &[(0, p(10.0)), (1, p(20.0)), (2, p(30.0))]);
+        // The first meter carried to the end: the values go with their meters
+        values.renew(&["a", "b", "c"], &["b", "c", "a"]);
+        assert_eq!(values.values(), [p(20.0), p(30.0), p(10.0)]);
+        assert_eq!(values.publish(old, &[(0, p(99.0))]), None);
+        // A meter new to the list has nothing yet; two alike each keep their own
+        values.renew(&["b", "c", "a"], &["x", "a", "c"]);
+        assert_eq!(values.values(), [None, p(10.0), p(30.0)]);
+        values.publish(values.generation(), &[(0, p(1.0)), (2, p(2.0))]);
+        values.renew(&["d", "a", "d"], &["d", "d"]);
+        assert_eq!(values.values(), [p(1.0), p(2.0)]);
     }
 
     #[test]

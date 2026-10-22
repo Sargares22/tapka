@@ -94,6 +94,8 @@
      others make room */
   .item.carried{z-index:2}
   .item.carried .key{transform:scale(1.12);background:var(--key-hot);box-shadow:inset 0 0 0 1.5px var(--accent),0 4px 10px rgba(0,0,0,.45)}
+  .meter.carried{z-index:2}
+  .meter.carried .dial{transform:scale(1.12);background:var(--key-hot);box-shadow:inset 0 0 0 1.5px var(--accent),0 4px 10px rgba(0,0,0,.45)}
   /* The plus is not a key: a small quiet mark in the foot of the pill, like the bar of the handle
      at its head. The whole foot takes the press. A tap on it puts two signs of the same look in
      its place, the gear and the arrow to the edge, each as long as the plus. */
@@ -222,16 +224,16 @@
   const tail = Object.assign(document.createElement('div'), { id: 'stretch' });
   const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
   const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8, EDGE = 22, EDGE_STEP = 6, NOTE_MS = 2000, FAILED_MS = 2500, APPEAR_MS = 180, FLASH_MS = 140, SIGNS_MS = 4000, PEEK = 18;
-  // The pill's parts as layout.rs has them (GRIP, ADD, END, STRETCH, LINE, METER, SHOWN); above
+  // The pill's parts as layout.rs has them (GRIP, ADD, END, STRETCH, LINE, METER); above
   // WARN a meter takes the warning colour
-  const GRIP = 44, ADD = 38, END = 3, STRETCH = 44, LINE = 14, METER = 52, SHOWN = 4, WARN = 80;
+  const GRIP = 44, ADD = 38, END = 3, STRETCH = 44, LINE = 14, METER = 52, WARN = 80;
   // The meters as Rust sent them, with their values, and the generation of those values; the
-  // share of the room the keys take, as the line stands now and as the settings have it
-  let meters = [], generation = null, split = null, saved = null, cell = 54, count = 0;
+  // share of the room the keys take, as the line stands
+  let meters = [], generation = null, split = null, cell = 54, count = 0;
   // The cells the capsule was stretched to, or null for as many as its keys, up to four; what
   // the end grip may stretch it to: `[cells, length of the pill with the signs, room of its keys and
   // meters]`, as Rust sent them; and the room the keys and the meters share, with the plus and with
-  // the signs (`layout::room`)
+  // the signs (`layout::room`), the same wherever the line stands
   let length = null, reach = [], room = null;
   // What the label of a meter with nothing found says in place of its percent
   let noData = '—';
@@ -378,20 +380,22 @@
       fill(b.querySelector('.ring'), meters[it.ring] ? meters[it.ring].value : null);
     }
   }
-  // The keys and the meters share the room between them as `parts` in layout.rs does: neither part
-  // longer than what it holds, so the capsule never shows empty cells, and each with one whole key
-  // or meter. The line is the end of the keys' part, `share` of the room; without it the meters take
-  // all they need while the keys keep up to four cells. Rust works out the pill's length the same
-  // way; the page shares the room itself only while the line is pulled.
+  // The keys and the meters share the room between them as `parts` in layout.rs does. The room is
+  // the same wherever the line stands; the line moves the border inside it a whole meter at a time:
+  // the meters' part is whole meters, one or more and no more than all of them, the keys get the
+  // rest, a key's cell or more and no more than all of them, and scroll in it. Of those places the
+  // line stands at the one nearest to `share` of the room; without it the meters show as many as
+  // they can.
   function parts(r, share) {
-    const keys = count * cell, all = meters.length * METER;
+    const n = count, m = meters.length;
     r = Math.max(r, 0);
-    if (!meters.length) return [Math.min(keys, r), 0];
-    const least = Math.min(keys, cell), leave = Math.min(all, METER);
-    if (least + leave > r) { const k = r * least / (least + leave); return [k, r - k]; }
-    const at = share != null ? Math.min(Math.max(share * r, least), Math.min(keys, r - leave))
-      : Math.min(keys, r - Math.min(all, Math.max(r - Math.min(keys, SHOWN * cell), leave)));
-    return [at, Math.min(all, r - at)];
+    if (!m) return [Math.min(n * cell, r), 0];
+    if (!n) return [0, Math.min(m * METER, r)];
+    if (cell + METER > r) { const k = r * cell / (cell + METER); return [k, r - k]; }
+    const most = Math.min(m, Math.floor((r - cell) / METER + 1e-6));
+    const fewest = Math.min(most, Math.max(1, Math.ceil((r - n * cell) / METER - 1e-6)));
+    const shown = Math.min(Math.max(share != null ? Math.max(0, Math.round((1 - share) * r / METER)) : most, fewest), most);
+    return [r - shown * METER, shown * METER];
   }
   // The room the two parts share now: as Rust sent it, or else what the pill leaves them
   function roomNow() {
@@ -422,14 +426,7 @@
   let lengths = null;
   function stretch() {
     if (!lengths) return;
-    let long = lengths[signs ? 1 : 0];
-    // A line pulled away from where the settings have it shortens or lengthens the pill by what its
-    // parts gain or lose: Rust has the length for the line in the settings only. The window follows
-    // once the line is let go
-    if (meters.length && split !== saved) {
-      const r = roomNow(), [k, m] = parts(r, split), [k0, m0] = parts(r, saved);
-      long += k + m - k0 - m0;
-    }
+    const long = lengths[signs ? 1 : 0];
     pill.style.height = flat() || folded ? '' : long + 'px';
     pill.style.width = flat() && !folded ? long + 'px' : '';
   }
@@ -498,7 +495,7 @@
     // A view copied before the last event `meters` came reaches the page after it: the event's
     // values are the newer ones, and an unchanged read sends no other
     if (latest && latest.generation === generation && latest.readings > (view.readings ?? 0)) takeValues(latest.values);
-    split = saved = view.divider ?? null;
+    split = view.divider ?? null;
     length = view.length ?? null;
     reach = view.reach || [];
     room = view.room || null;
@@ -632,6 +629,7 @@
     if (b.classList.contains('meter')) {
       // What it says about time comes before the hint: when it resets, how long ago it was updated
       const m = meters[Number(b.dataset.m)];
+      cardAt = scrolled(gauges);
       return openCard(b, m.name, m.value == null ? noData : percent(m.value), [...(m.notes || []), ...(m.hint || [])]);
     }
     const it = shown[Number(b.dataset.i)];
@@ -720,7 +718,7 @@
     const b = e.target.closest('.item');
     // The item is kept as it was at the press: the release taps it whatever is drawn by then
     press = {
-      id: e.pointerId, index: b ? Number(b.dataset.i) : -1, item: b ? shown[Number(b.dataset.i)] : null, x: e.clientX, y: e.clientY,
+      id: e.pointerId, box: list, index: b ? Number(b.dataset.i) : -1, item: b ? shown[Number(b.dataset.i)] : null, x: e.clientX, y: e.clientY,
       scroll: flat() ? list.scrollLeft : list.scrollTop, mouse: e.pointerType === 'mouse', long: false, scrolling: false,
       veiled: !!b && b.parentElement === list && veiled(b),
     };
@@ -741,23 +739,24 @@
     }, LONG_PRESS_MS);
   });
   // Order: the carried key follows the pointer along the list, the keys it passes step aside, and
-  // near an end of the list the list scrolls on. `to` is where the key would land now.
+  // near an end of the list the list scrolls on. `to` is where the key would land now. A meter is
+  // carried the same way along the meters (`p.box`).
   const along = e => flat() ? e.clientX : e.clientY;
-  const scrolled = () => flat() ? list.scrollLeft : list.scrollTop;
+  const scrolled = box => flat() ? box.scrollLeft : box.scrollTop;
   function carry(p, e) {
-    const rows = [...list.children];
+    const rows = [...p.box.children];
     if (!p.carry) {
       hideCard();
       lift();
       const row = rows[p.index];
-      p.carry = { row, from: p.index, to: p.index, starts: rows.map(r => flat() ? r.offsetLeft : r.offsetTop) };
+      p.carry = { box: p.box, row, from: p.index, to: p.index, starts: rows.map(r => flat() ? r.offsetLeft : r.offsetTop) };
       row.classList.add('carried');
     }
-    const c = p.carry, box = list.getBoundingClientRect();
+    const c = p.carry, box = c.box.getBoundingClientRect();
     const [near, far] = flat() ? [box.left, box.right] : [box.top, box.bottom];
     const step = along(e) < near + EDGE ? -EDGE_STEP : along(e) > far - EDGE ? EDGE_STEP : 0;
-    if (flat()) list.scrollLeft += step; else list.scrollTop += step;
-    const moved = along(e) - (flat() ? p.x : p.y) + scrolled() - p.scroll;
+    if (flat()) c.box.scrollLeft += step; else c.box.scrollTop += step;
+    const moved = along(e) - (flat() ? p.x : p.y) + scrolled(c.box) - p.scroll;
     const d = Math.max(c.starts[0] - c.starts[c.from], Math.min(c.starts[c.starts.length - 1] - c.starts[c.from], moved));
     const at = c.starts[c.from] + d, size = flat() ? c.row.offsetWidth : c.row.offsetHeight;
     const shift = px => flat() ? `translateX(${px}px)` : `translateY(${px}px)`;
@@ -778,7 +777,7 @@
       c.row.style.transform = (flat() ? 'translateX(' : 'translateY(') + (c.starts[c.to] - c.starts[c.from]) + 'px)';
       return;
     }
-    for (const r of list.children) r.style.transform = r.style.transition = '';
+    for (const r of c.box.children) r.style.transform = r.style.transition = '';
     c.row.classList.remove('carried');
   }
   window.addEventListener('pointermove', e => {
@@ -821,7 +820,7 @@
       const c = p.carry, moved = c.to !== c.from;
       settle(c, moved);
       // Rust is told the places in the settings file; its reload draws the keys in the new order
-      if (moved) invoke('move_item', { from: shown[c.from].at, to: shown[c.to].at }).catch(() => redraw());
+      if (moved) invoke('move_item', { from: shown[c.from].at, to: shown[c.to].at, name: shown[c.from].name }).catch(() => redraw());
     }
     const tap = still && !p.long && p.index >= 0 && keyAt(p.index);
     if (tap && p.veiled) reveal(keyAt(p.index));
@@ -854,20 +853,18 @@
   keys.addEventListener('lostpointercapture', drop);
 
   // The line between the keys and the meters follows a finger, a pen or the mouse along the
-  // capsule; let go, it stays there, and Rust keeps the place in the settings file
+  // capsule a whole meter at a time; let go, it stays there, and Rust keeps the place in the settings
+  // file. The pill keeps its length, so the window stays as it is
   let pull = null;
   divider.addEventListener('pointerdown', e => {
     hideCard();
     pull = { id: e.pointerId, moved: false };
     try { divider.setPointerCapture(e.pointerId); } catch (_) {}
     divider.classList.add('pulled');
-    // Rust gives the window room for the longest pill the line can make, once, at the press: a
-    // pill grown past its window was cut, and a window changed while the line moves ends a touch
-    invoke('divider', { pulled: true });
   });
-  // The line is where the keys' part ends, and stops where its keys end; the meters take what is
-  // left of the room up to all of them, and past that the pill is shorter. The share kept is the
-  // place drawn, so the line comes back where it was let go
+  // The line stands at the number of meters nearest to the pointer that leaves the keys a key's
+  // cell and nothing empty after them. The share kept is the place drawn, so the line comes back where it
+  // was let go
   divider.addEventListener('pointermove', e => {
     if (!pull || pull.id !== e.pointerId) return;
     const a = list.getBoundingClientRect(), r = roomNow();
@@ -882,10 +879,10 @@
     const moved = pull.moved;
     pull = null;
     divider.classList.remove('pulled');
-    // The capsule is drawn anew once Rust has the new place and has sized the window for it:
-    // drawn before, it would put the line back where it was
+    // The capsule is drawn anew once Rust has the new place: drawn before, it would put the line
+    // back where it was
     if (moved) invoke('set_divider', { at: split }).catch(() => {}).then(() => { putOff(); afterPress(); });
-    else { invoke('divider', { pulled: false }); afterPress(); }
+    else afterPress();
   }
   for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) divider.addEventListener(type, letGo);
 
@@ -920,7 +917,7 @@
     lengths = [lengths[0], long];
     if (room) room = [room[0], rm ?? room[1]];
     stretch();
-    // The keys and the meters share the new room, each keeping one whole key or meter
+    // The keys and the meters share the new room, the keys a key's cell, the meters a whole meter
     share();
     invoke('resize', { cells, step: 'step' });
   }
@@ -961,12 +958,16 @@
     afterPress();
   });
 
-  // Presses on the meters: a tap on one that reads a program opens the program; held for
-  // LONG_PRESS_MS it shows its name and percent; a finger that moves scrolls the meters
-  let tick = null;
+  // Presses on the meters: a press shows the meter's label at once, which stays LABEL_STAYS_MS after
+  // the release; a tap on one that reads a program opens the program; held for LONG_PRESS_MS and
+  // then moved, the meter is carried to another place among the meters, as a key is among the keys;
+  // a finger that moves before that scrolls the meters
+  let tick = null, cardAt = 0;
   const dropTick = () => {
     if (!tick) return;
+    clearTimeout(tick.hold);
     if (tick.b) tick.b.classList.remove('down');
+    if (tick.carry) settle(tick.carry, false);
     tick = null;
     hideCard();
     afterPress();
@@ -974,35 +975,53 @@
   gauges.addEventListener('pointerdown', e => {
     hideCard();
     const b = e.target.closest('.meter');
-    tick = { id: e.pointerId, b, x: e.clientX, y: e.clientY, scroll: flat() ? gauges.scrollLeft : gauges.scrollTop, mouse: e.pointerType === 'mouse', long: false, scrolling: false };
+    tick = { id: e.pointerId, b, box: gauges, index: b ? Number(b.dataset.m) : -1, x: e.clientX, y: e.clientY, scroll: scrolled(gauges), mouse: e.pointerType === 'mouse', long: false, scrolling: false };
     try { gauges.setPointerCapture(e.pointerId); } catch (_) {}
     if (!b) return;
     b.classList.add('down');
-    cardTimer = setTimeout(() => {
+    showCard(b);
+    tick.hold = setTimeout(() => {
       if (!tick || tick.b !== b) return;
       tick.long = true;
-      showCard(b);
+      // Should the release never reach the page, the label still does not stay for good
       cardTimer = setTimeout(dropTick, LABEL_STAYS_MS);
     }, LONG_PRESS_MS);
   });
   gauges.addEventListener('pointermove', e => {
     const p = tick;
     if (!p || p.id !== e.pointerId) return;
+    if (p.carry) return carry(p, e);
     if (!p.scrolling && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP) return;
+    // A meter that moves after the hold is being carried to another place
+    if (p.long && !p.scrolling && p.b) return carry(p, e);
     if (p.mouse) return;
     p.scrolling = true;
-    hideCard();
     if (p.b) p.b.classList.remove('down');
+    const before = scrolled(gauges);
     if (flat()) gauges.scrollLeft = p.scroll - (e.clientX - p.x);
     else gauges.scrollTop = p.scroll - (e.clientY - p.y);
+    // The label goes once the meters move under it, not at the end of the list or with one meter
+    if (scrolled(gauges) !== before) hideCard();
   });
   gauges.addEventListener('pointerup', e => {
     const p = tick;
     if (!p || p.id !== e.pointerId) return;
     tick = null;
+    clearTimeout(p.hold);
     if (p.b) p.b.classList.remove('down');
-    hideCard();
     if (signs) closeSigns();
+    if (p.carry) {
+      const c = p.carry, moved = c.to !== c.from;
+      settle(c, moved);
+      // Rust is told the places in the settings file, with the meter as it was drawn: a file
+      // changed meanwhile moves nothing. Its reload draws the meters in the new order
+      const m = meters[c.from];
+      if (moved) invoke('move_meter', { from: c.from, to: c.to, name: m.name, target: m.target ?? null }).catch(() => redraw());
+      return afterPress();
+    }
+    // The label stays a while after the release, unless the meters scrolled it away
+    clearTimeout(cardTimer);
+    if (!card.hidden && cardFor === p.b) cardTimer = setTimeout(hideCard, LABEL_STAYS_MS);
     const still = !p.scrolling && Math.hypot(e.clientX - p.x, e.clientY - p.y) < SLOP;
     const m = p.b && meters[Number(p.b.dataset.m)];
     if (still && !p.long && m && m.target) {
@@ -1015,8 +1034,9 @@
   gauges.addEventListener('pointercancel', dropTick);
   gauges.addEventListener('lostpointercapture', dropTick);
   gauges.addEventListener('wheel', e => { if (flat()) gauges.scrollLeft += e.deltaY; }, { passive: true });
-  // A meter's label does not follow it along its list: it closes
-  gauges.addEventListener('scroll', () => { if (cardFor && cardFor.parentElement === gauges) hideCard(); }, { passive: true });
+  // A meter's label does not follow it along its list: it closes once the meters have moved from
+  // where they were when it opened (`cardAt`), not for a scroll event that moved nothing
+  gauges.addEventListener('scroll', () => { if (cardFor && cardFor.parentElement === gauges && scrolled(gauges) !== cardAt) hideCard(); }, { passive: true });
 
   // Rust reads the meters about once a second and sends their values when one changed: a
   // percent with a file's outer ring and hint, or null where nothing was found, for each meter of
@@ -1064,6 +1084,8 @@
     // The mouse left the pill: the signs have their time again from now
     if (signs && wasOver && !overPill) waitForSigns();
     if (!at && press && press.long && !press.carry) drop();
+    // While a meter is pressed its label is the press's, not the cursor's
+    if (tick) return;
     const el = at && !afterTouch && !press ? document.elementFromPoint(at[0], at[1]) : null;
     const b = el ? el.closest('.item, .meter') : null;
     grip.classList.toggle('hot', !!el && !!el.closest('#grip'));
