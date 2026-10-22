@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.2 (2026-10-22)
+
+- The capsule no longer stays hidden behind other programs' windows that keep above the others: it comes back in front within half a second. A game or a video in full screen in front is left alone.
+
 ## 1.4.1 (2026-10-22)
 
 - The capsule keeps its length while you drag the line between keys and gauges: only the bar at the far end changes it. The line moves one whole gauge at a time: drag it up to show one more gauge, down to one fewer. Every gauge can be shown whole as long as one key still fits; the keys scroll in the rest.

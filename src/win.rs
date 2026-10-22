@@ -112,6 +112,40 @@ pub fn is_visible(hwnd: isize) -> bool {
     unsafe { IsWindowVisible(HWND(hwnd as _)).as_bool() }
 }
 
+/// Puts a window that stays above the others back in front of them, without making it active.
+/// Windows keeps all such windows in one order, and the one raised last is in front.
+pub fn raise(hwnd: isize) {
+    unsafe {
+        let _ = SetWindowPos(HWND(hwnd as _), Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+/// The active window belongs to another program and covers its whole screen: a game or a video
+/// in full screen. A maximized window leaves the taskbar and is not counted; the desktop is not.
+pub fn front_is_full_screen() -> bool {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_invalid() || owner_of(hwnd) == GetCurrentProcessId() || matches!(class_of(hwnd).as_str(), "Progman" | "WorkerW") {
+            return false;
+        }
+        let Some(((x, y, w, h), _)) = frame_of(hwnd) else { return false };
+        let mut screen = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut screen).as_bool() {
+            return false;
+        }
+        let m = screen.rcMonitor;
+        x <= m.left && y <= m.top && x + w >= m.right && y + h >= m.bottom
+    }
+}
+
+/// The active window is one of the panel's own.
+pub fn front_is_mine() -> bool {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        !hwnd.is_invalid() && owner_of(hwnd) == GetCurrentProcessId()
+    }
+}
+
 /// Where the mouse cursor is inside a visible window, in physical px from its top-left corner;
 /// `None` when the cursor is elsewhere or the window is hidden.
 pub fn cursor_in_window(hwnd: isize) -> Option<(i32, i32)> {

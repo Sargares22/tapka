@@ -2462,9 +2462,20 @@ fn watch_settings(app: AppHandle, mut by_keyboard: bool) {
             }
             // A hidden capsule shows no marks and needs no handle above it: the desktop is not
             // looked over until it is back
-            let shown = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).is_some_and(|h| win::is_visible(h.0 as isize));
+            let capsule = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize);
+            let shown = capsule.is_some_and(win::is_visible);
             if shown && state.carry.lock().unwrap().is_none() {
-                grab::raise();
+                // Other programs' windows that stay above the others take the front whenever they
+                // are raised: the capsule takes it back, but not from a game or a video in full
+                // screen, nor from the panel's own windows such as the welcome window. The handle
+                // stays out of a full screen too: it would take presses there
+                let full_screen = win::front_is_full_screen();
+                if let Some(capsule) = capsule.filter(|_| !full_screen && !win::front_is_mine()) {
+                    win::raise(capsule);
+                }
+                if !full_screen {
+                    grab::raise();
+                }
                 follow_front(&app);
                 follow_docked(&app);
             }

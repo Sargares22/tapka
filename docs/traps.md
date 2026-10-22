@@ -11,6 +11,11 @@ The words are explained in `docs/map.md`. Read this before changing any code.
   (`win::set_region`). Changing the window's style drops the region: see `win::quiet_frame`.
 - Carrying is done by Windows through the handle window in `src/grab.rs`. Only
   `grab::set_visible` shows or hides it.
+- Every window that stays above the others shares one order with the capsule, and the one raised
+  last is in front. The half-second loop of `watch_settings` raises the capsule (`win::raise`) and
+  then the handle, in this order: a capsule above its handle swallows the presses on it. It raises
+  neither while a window of another program covers its whole screen, and skips the capsule while
+  one of the panel's own windows is active, so the welcome window stays above the capsule.
 - What the person asked for goes through `set_capsule_visible` in `src/main.rs`: it remembers
   the choice (`wanted`), which the tray, the keyboard rule (`tablet_only`) and the return after
   a snapshot all go by. A snapshot hides the window for a moment without touching `wanted`.
