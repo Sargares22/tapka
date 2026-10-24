@@ -71,18 +71,22 @@ for (const [theme, accent] of [['dark', '#8ab4ff'], ['light', '#ff8a3d']]) {
   const tall = '<style>html,body{width:348px!important;height:513px!important}body{position:relative}</style>';
   shoot('index.html', 'meters-file-' + theme, '348,513', { get_view: ringed }, tall + hoverMeter);
   shoot('index.html', 'meters-top-' + theme, '513,174', { get_view: { ...metered, edge: 'top' } }, '<style>html,body{width:513px!important;height:174px!important}</style>');
-  // Fresh, stale and no data: a program at 42 %, a file not updated for 12 minutes, grey with its last
-  // percent, and a file with nothing in it; the stale one hovered, its label with the countdown to the
-  // reset and its age. Then a file whose reset is past and whose outline resets next week
-  const states = { ...metered, no_data: 'no data', meters: [metered.meters[0],
-    { name: 'Limits', icon: null, target: null, value: 64, outer: 30, stale: true, hint: ['Week: 30 %'], notes: ['resets in 2 h 33 min', 'outline: resets Mon 26 Oct, 11:00', 'updated 12 min ago'] },
-    { name: 'backup', icon: null, target: null, value: null }] };
+  // The labels of meters, each hovered, in Russian, whose words are the longest: an AI limit with its
+  // two rows and a problem; a file of two numbers with its own lines; a stale limit from Codex's log;
+  // a limit never read; a program's one row; and an AI limit in English
   const hoverAt = i => `<script>setTimeout(()=>{const r=document.querySelectorAll('.meter')[${i}].getBoundingClientRect();window.__on.hover({payload:[r.left+r.width/2,r.top+r.height/2]})},100)</script>`;
-  shoot('index.html', 'meters-stale-' + theme, '348,513', { get_view: states }, tall + hoverAt(1));
-  // Headless Chrome's page ends a little above the picture's bottom: the meter hovered is the second
-  shoot('index.html', 'meters-nodata-' + theme, '348,513', { get_view: { ...states, meters: [states.meters[0], states.meters[2], states.meters[1]] } }, tall + hoverAt(1));
-  const due = { ...states, meters: [states.meters[0], { ...states.meters[1], stale: false, notes: ['due, waiting for an update', 'outline: resets Mon 26 Oct, 11:00'] }, states.meters[2]] };
-  shoot('index.html', 'meters-due-' + theme, '348,513', { get_view: due }, tall + hoverAt(1));
+  const labels = {
+    limit: { name: 'Claude', limit: 'claude', value: 74, outer: 100, rows: ['5 часов', 'Неделя'], when: ['сброс через 23 ч 59 мин', 'сброс пн 2 ноя, 10:59'], problem: 'Нажмите, чтобы подключить' },
+    file: { name: 'backup', value: 64, outer: 88, when: ['сброс через 2 ч 10 мин', 'сброс пн, 10:59'], hint: ['Диск D: 64 %', 'Скопировано 1 240 из 1 930 файлов'] },
+    stale: { name: 'ChatGPT', limit: 'chatgpt', value: 30, outer: 20, stale: true, rows: ['5 часов', 'Неделя'], when: ['сбросился', 'сброс пт, 22:03'], ago: 'обновлено 2 ч 5 мин назад', hint: ['по последнему запуску Codex'], problem: 'Нажмите, чтобы подключить' },
+    nodata: { name: 'Claude', limit: 'claude', value: null, problem: 'Нажмите, чтобы подключить' },
+    program: { name: 'Render', value: 42 },
+    'limit-en': { name: 'Antigravity · Claude and GPT', limit: 'antigravity-claude', value: 74, outer: 6, rows: ['5 hours', 'Week'], when: ['resets in 2 h 10 min', 'resets Mon, 10:59'], problem: 'Tap to connect' },
+  };
+  for (const [kind, meter] of Object.entries(labels)) {
+    const shown = { ...metered, no_data: kind.endsWith('en') ? 'no data' : 'нет данных', used: kind.endsWith('en') ? 'used' : 'израсходовано', meters: [metered.meters[0], { icon: null, target: null, ...meter }, metered.meters[2]] };
+    shoot('index.html', `label-${kind}-${theme}`, '348,513', { get_view: shown }, tall + hoverAt(1));
+  }
   // Stretched to eight cells with three keys and two meters: the capsule ends with them, no empty
   // cells (handle 44, keys 162, line 14, meters 104, foot 41)
   const short = { ...view, items: items.slice(0, 3), length: 8, pill: [365, 447], room: [266, 266], divider: null, meters: metered.meters.slice(0, 2) };
@@ -96,7 +100,8 @@ for (const [theme, accent] of [['dark', '#8ab4ff'], ['light', '#ff8a3d']]) {
   const atOnce = "<script>{const l=document.getElementById('list'),by=l.scrollBy.bind(l);l.scrollBy=h=>{by({...h,behavior:'auto'});l.dispatchEvent(new Event('scrollend'))}}</script>";
   shoot('index.html', 'tip-' + theme, '348,340', { get_view: rimmed }, box + atOnce + "<script>setTimeout(()=>window.__on.added({payload:{at:[4,5],tip:'Tap a key'}}),100)</script>");
   const settings = {
-    meters: [{ raw: { name: 'Notes', program: 'C:\\Tools\\notes.exe' }, icon: null, problem: null }, { raw: { name: 'backup', file: 'D:\\backup.txt' }, icon: null, problem: null }],
+    meters: [{ raw: { name: 'Notes', program: 'C:\\Tools\\notes.exe' }, icon: null, problem: null }, { raw: { name: 'backup', file: 'D:\\backup.txt' }, icon: null, problem: null },
+      { raw: { name: 'Claude', limit: 'claude' }, icon: null, problem: null }, { raw: { name: 'ChatGPT', limit: 'chatgpt' }, icon: null, problem: null }],
     docked: [{ raw: 'sidebar.exe', name: 'Sidebar', icon: null, state: 'placed' }, { raw: 'dials.exe', name: 'Dials', icon: null, state: 'returns' },
       { raw: 'guard.exe', name: 'Guard', icon: null, state: 'refused' }],
     items: sample.map(raw => ({ raw, icon: null, glyph: glyphs[raw.icon] || null, problem: null })),
@@ -123,16 +128,30 @@ for (const [theme, accent] of [['dark', '#8ab4ff'], ['light', '#ff8a3d']]) {
   const lostSettings = { ...settings, items: settings.items.map(i => ({ ...i, lost: i.raw.name === 'Notes' })), repaired: [{ name: 'Sketch', path: 'C:\\Apps\\Sketch\\app-1.3.0\\sketch.exe' }],
     docked: [...settings.docked, { raw: { exe: 'clock.exe', path: 'C:\\Apps\\clock.exe' }, name: 'Clock', icon: null, state: 'missing' }] };
   shoot('settings.html', 'lost-settings-' + theme, '880,640', { get_settings: lostSettings });
-  shoot('settings.html', 'lost-docked-' + theme, '880,640', { get_settings: lostSettings }, "<script>setTimeout(()=>document.getElementById('docked-head').scrollIntoView(),100)</script>");
+  shoot('settings.html', 'lost-docked-' + theme, '880,640', { get_settings: lostSettings }, "<script>setTimeout(()=>show('docked'),100)</script>");
   // The card of a grey key whose program was found in another folder: it offers that place
   const offered = { ...lostSettings, items: lostSettings.items.map(i => i.lost ? { ...i, found: 'D:\\Portable\\notes.exe' } : i), card: 3 };
   shoot('settings.html', 'lost-card-' + theme, '880,640', { get_settings: offered });
-  // The meters, under the items
-  shoot('settings.html', 'meters-settings-' + theme, '880,640', { get_settings: settings }, "<script>setTimeout(()=>document.getElementById('meters-head').scrollIntoView(),100)</script>");
-  // Docking: the docked panels, one let be, and the panels offered at the edge with one ticked
-  shoot('settings.html', 'docked-settings-' + theme, '880,640', { get_settings: settings }, "<script>setTimeout(()=>document.getElementById('docked-head').scrollIntoView(),100)</script>");
+  // The three list pages in Russian. Claude is not connected, ChatGPT is; Antigravity's program is
+  // missing for one group, and the other connects when added
+  const ru = { ...settings, russian: true };
+  const limitStatus = { claude: { state: 'sign_in' }, chatgpt: { state: 'ok' }, 'antigravity-gemini': { state: 'missing' }, 'antigravity-claude': { state: 'unknown' } };
+  const page = s => `<script>setTimeout(()=>show('${s}'),300)</script>`;
+  shoot('settings.html', 'page-keys-' + theme, '880,640', { get_settings: ru, limit_status: limitStatus }, page('items'));
+  shoot('settings.html', 'page-meters-' + theme, '880,640', { get_settings: ru, limit_status: limitStatus }, page('meters'));
+  shoot('settings.html', 'page-docked-' + theme, '880,640', { get_settings: ru, limit_status: limitStatus }, page('docked'));
+  // An indicator's card: Claude, not connected, with Connect; a nearby panel's card that keeps its place
+  shoot('settings.html', 'meter-card-' + theme, '880,640', { get_settings: ru, limit_status: limitStatus }, "<script>setTimeout(()=>{show('meters');document.querySelectorAll('#meters .row')[2].click()},300)</script>");
+  shoot('settings.html', 'docked-card-' + theme, '880,640', { get_settings: ru, limit_status: limitStatus }, "<script>setTimeout(()=>{show('docked');document.querySelectorAll('#docked .row')[1].click()},300)</script>");
+  // Adding an indicator: the kinds, the AI services with where each stands, and Connect explained
+  const kinds = "document.getElementById('add-meter').click()", services = kinds + ";document.querySelectorAll('#body .row')[1].click()";
+  shoot('settings.html', 'meter-kinds-' + theme, '880,640', { get_settings: ru, limit_status: limitStatus }, `<script>setTimeout(()=>{show('meters');${kinds}},300)</script>`);
+  shoot('settings.html', 'meter-limit-' + theme, '880,640', { get_settings: ru, limit_status: limitStatus }, `<script>setTimeout(()=>{show('meters');${services}},300)</script>`);
+  shoot('settings.html', 'meter-limit-offer-' + theme, '880,640', { get_settings: ru, limit_status: limitStatus },
+    `<script>setTimeout(()=>{show('meters');${services};setTimeout(()=>document.querySelectorAll('#body .row')[0].click(),100)},300)</script>`);
+  // The panels at the edge offered, with one ticked
   shoot('settings.html', 'dock-pick-' + theme, '880,640', { get_settings: settings, dock_candidates: [{ raw: { exe: 'clock.exe' }, name: 'Clock', icon: null }, { raw: { exe: 'notes.exe' }, name: 'Notes', icon: null }] },
-    "<script>setTimeout(()=>{document.getElementById('add-docked').click();setTimeout(()=>document.querySelector('#dock-list .row').click(),100)},100)</script>");
+    "<script>setTimeout(()=>{show('docked');document.getElementById('add-docked').click();setTimeout(()=>document.querySelector('#dock-list .row').click(),100)},100)</script>");
   // The Look section, in Russian and with its switch on
   shoot('settings.html', 'look-' + theme, '880,640', { get_settings: { ...settings, russian: true, tablet_only: true } }, "<script>setTimeout(()=>show('look'),100)</script>");
 }

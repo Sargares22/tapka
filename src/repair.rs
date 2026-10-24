@@ -50,7 +50,7 @@ pub fn targets(settings: &Settings) -> Vec<String> {
     });
     let meters = settings.meters.iter().filter_map(|m| match &m.source {
         Source::Program(target) => Some(target),
-        Source::File(_) => None,
+        Source::File(_) | Source::Limit(_) => None,
     });
     let docked = settings.docked.iter().filter_map(|d| d.path.as_ref());
     let mut found: Vec<String> = Vec::new();

@@ -127,6 +127,37 @@ The words are explained in `docs/map.md`. Read this before changing any code.
 
 ## The meters
 
+- An expired Claude token is never sent: Anthropic answers it with 429 and a Retry-After of about
+  an hour, not 401, which reads as too many questions for as long as the token stays old
+  (`limits::read_claude`). The token is renewed by `claude -p` with an empty input shortly before
+  it expires, judged by the expiry in the file, never by the exit code. It runs in a job
+  (`agy::Job`) that ends it and the node a claude run through cmd starts, on the timeout and when the
+  panel quits mid-run. The token read again after a 401 is checked for expiry too, and a renewal
+  does not cut short a wait the service asked for with 429. The Claude desktop app's own Claude Code
+  never writes the file, so it is never the one started (`limits::desktop_owned`).
+- The sign-in of an AI service runs in a console the person sees, started with
+  `CREATE_NEW_CONSOLE` by Rust's own `Command`: the panel is a windows-subsystem program with no
+  standard handles, and Command passes none on then, so the new console gives the program its own:
+  a program started with standard handles would write past the window. It is in no job, unlike the renewal, so closing the panel does not end it. While the
+  sign-in may run, the service is asked every 5 s, which for Claude costs no request until the
+  credential file has a token (`read_claude` stops at `SignIn`), and stops at the first good read.
+- The settings window changes a meter by the entry as drawn, as `move_meter` does: a rename takes the
+  entry at the place drawn only while it is still the one drawn (of two alike, the one touched), and
+  *Change* looks for it again in the file as it is when the new source is chosen; otherwise nothing is
+  written. A drop counts its place among the meters the panel uses and the list takes the very move
+  `config::with_moved` makes, so a broken meter in between stands where the file has it.
+- One sign-in per group of services at a time (`SIGNING` in `src/limits.rs`): a second call while
+  the first program still runs starts nothing and the page says "Вход уже открыт". *Check again* is
+  a flag (`ASK`) the thread takes at its next round, not a time: a run of Antigravity's command may
+  last 70 s.
+- A reading of an AI limit is asked every five minutes, so it stays fresh 12 minutes: with the
+  file's five it went grey before each read. One from Codex's log keeps the five, and a log line
+  without a time is not taken: a reading of no known age would never turn grey.
+- Antigravity's command writes nothing through plain pipes: it runs in a pseudo console
+  (`agy::run`), started suspended and put in a job first, so nothing it starts slips out, and the
+  job ends before the console closes. Version 1.4.6 writes a reset as `2026-10-23 22:28 +07`, not
+  RFC 3339 as Codenotch expected (`agy::reset_time` takes both). A run can exit 1 after its own
+  30 s timeout; the last reading then stays.
 - Right after the panel starts, UI Automation can refuse to make a condition with E_FAIL; a moment
   later it works. `meters::Reader::new` tries five times, two seconds apart, and logs the step
   that failed. Seen on the owner's machine with the release build; a test run never hits it.
@@ -216,7 +247,10 @@ The words are explained in `docs/map.md`. Read this before changing any code.
   carry `readings`, the count of changes `meters::Values` keeps, which only grows, and the page keeps
   the newest it has seen.
 - The words about time are made in Rust (`meters::dated`) each round, in the language of the
-  settings, and come as any changed value: the page has no clock of its own for them.
+  settings, and come as any changed value: the page has no clock of its own for them. Every word of
+  a meter's label is Rust's or the user's, so the label never mixes languages; the page only lays
+  them out. A label as long as an AI limit's in Russian, `Неделя 100 % сброс пн 2 ноя, 10:59`,
+  fills the 260 px the window leaves it: a longer row or a larger font gets cut at the screen edge.
 - A meter's square stands at the top of its cell, not in its middle: the second outline reaches
   2.5 px past the square, and centred with the percent under it, it would run past the cell into
   the divider or the next meter. At the top edge the cell is as tall as the strip, so there it is

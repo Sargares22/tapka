@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0 (2026-10-24)
+
+- AI usage indicators: Tapka shows how much of your Claude, ChatGPT or Antigravity limit is used, for the 5-hour window (the indicator) and the week (the thin second outline), with the time each one resets. It reads them through the sign-in of Claude Code, Codex or Antigravity on this computer, every five minutes while such an indicator is in the capsule. No script and no other program is needed.
+- Connecting is done in Tapka: *Connect* in the settings, or a tap on a grey indicator in the capsule, opens the service's own sign-in in the browser. Tapka never sees your password. Each indicator says whether it is connected, and offers *Check again* or *Install* when something is missing.
+- A new label for indicators: the name, then one row for the 5 hours and one for the week, each with its percent and its reset time, and the word *used* so the percent reads one way only. A problem shows as one plain line at the bottom. A reset that has passed says *reset*.
+- The settings window has separate pages: Keys, Indicators and Nearby panels (the panels Tapka keeps under the capsule, once called docking). Indicators move by their dots in the settings as they do in the capsule, and a tap opens a card to rename one, change its source or remove it. Nearby panels open a card that explains their state.
+- Gauges are now called indicators everywhere in the window.
+
 ## 1.4.2 (2026-10-22)
 
 - The capsule no longer stays hidden behind other programs' windows that keep above the others: it comes back in front within half a second. A game or a video in full screen in front is left alone.

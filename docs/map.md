@@ -25,8 +25,10 @@ Tapka is one binary, two pages and one settings file. Rust + Tauri 2 + WebView2.
 - **Mark** — the dot on a key whose program is running.
 - **Label** — the name and hint shown beside a key; also where a failure is said.
 - **Meter** — a small rounded square under the keys with a percent, filled along its outline:
-  the progress of a program the user chose, or the number in a file the user chose (`meters` in
-  the settings file). A file may also give a second number, drawn as a thin **outer ring**, a
+  the progress of a program the user chose, the number in a file the user chose, or an **AI limit** (*AI usage* in the window),
+  the share used of the usage limits of the Claude Code, the Codex or the Antigravity sign-in on this
+  machine (`meters` in the settings file, `limit`: `claude`, `chatgpt`, `antigravity-gemini` or
+  `antigravity-claude`). A file may also give a second number, drawn as a thin **outer ring**, a
   second outline just outside the square, and lines of **hint**,
   which the meter's label shows under its percent, and lines of **times**: when its writer last read
   the numbers, how long they stay fresh, when they reset. A meter of a file older than it allows is
@@ -63,6 +65,8 @@ Tapka is one binary, two pages and one settings file. Rust + Tauri 2 + WebView2.
 | `src/win.rs` | Win32: keys, windows, rights, visibility, regions, the desktop scan, the running processes of a file name |
 | `src/grab.rs` | The handle window and the slot; tells a tap on the folded key from a carry |
 | `src/layout.rs` | Capsule geometry, pure: where the window, the pill, the folded key and the handle go |
+| `src/limits.rs` | The meters of AI limits: Claude Code's and Codex's sign-ins, the questions to Anthropic and OpenAI, the token renewal, Codex's log of its last run, what each service last told (`limits::read`) |
+| `src/agy.rs` | Antigravity's quota: its command run hidden in a pseudo console inside a job that ends with all it started, the report read into a lane per group of models and window |
 | `src/meters.rs` | Where a docked window draws itself (`Reader::drawn`); the meters: a program's progress through UI Automation (its taskbar button, its windows' progress bars) or its window title, the number in a file; the rims of keys whose program shows taskbar progress |
 | `src/dock.rs` | Docking, pure: which part of a docked window shows, where the docked panels stand under the capsule, which windows stand at its edge, when one that fights back is let be |
 | `src/repair.rs` | Path repair, pure but for what the `Machine` it is given answers: which targets are exe paths, the newest sibling version folder that holds the exe, whether a find is the same installation, what the look found (`Same`, `Elsewhere`, none, several), the paths that are lost, the settings text with the old paths put right, the lines the settings window shows about it |
@@ -141,7 +145,20 @@ of the meter, kept from the program list), or for an app by its whole id; else a
 any visible window of the program, its dialogs included (`win::program_windows`,
 `meters::window_of`), else a title of one that starts with a percent. Both put what they found
 into `meters::Values`, a `meters::Reading` per meter: the percent, and from a file the outer ring,
-the hint, `stale` and `notes`; a program's has none of them. A file is read each round whether it
+and what its label says: `rows`, the names of its rows (an AI limit's `5 часов` and `Неделя`),
+`when`, each row's reset in words, `ago`, how old a stale reading is, `hint`, plain lines (a
+file's own text), and `problem`, why an AI limit could not be read; a program's has only the percent. A meter of an AI limit comes into
+the files' round too (`limits::read`): each service has a thread of its own (`limits::watch`,
+started by `watch_meters`; Antigravity's two groups share one, `limits::ASKED`, as one run of its
+command, `agy::read_quota`, tells both) that asks it soon after the start and after a meter of it is added, then
+every five minutes, only while a meter names it, whether the capsule is open or not, and keeps the
+last good reading; `limits::read` makes of it a `Reading` with the five hours as the percent, the
+week as the outer ring, rows named by the windows' lengths, both resets, the reason of a failure as
+the problem, that it comes from Codex's log as a line only once stale, and the time it was read as
+`updated`, which `meters::dated` turns grey after 12 minutes. With no reading yet it gives a
+`Reading` without a percent whose problem is why the read failed, which the label shows under *no
+data*; before any read, none. The label of a meter is built by `showCard` in `ui/index.html`: a
+grid of rows (name, percent, reset), the plain lines, the problem under a thin line. A file is read each round whether it
 changed or not, so the words about time change every minute and go to the page as any change. A changed value goes to the page as the event `meters`, with the generation
 of the list it is for. The page draws the meters under the keys and the rings on the keys of the
 same program (`meters::same_program`). The programs' thread reads the taskbar once a round
@@ -157,7 +174,29 @@ program, which does what a tap on a key of the program does: it opens the progra
 forward, or folds it away when it is in front. A meter held and carried to another place calls
 `move_meter` with the two places in the settings' list of meters and the meter's name and program
 (`config::with_moved`, as `move_item` for the keys, which sends the key's name); the reload keeps the values read so far with their meters
-(`meters::Values::renew`). The settings window writes the list with `save_meters`.
+(`meters::Values::renew`). The settings window writes the list with `save_meters`, and a meter
+carried there by its dots (`reorderable` in `ui/settings.html`, the same as for the items) goes
+by `move_meter` too, by places among the meters the panel uses.
+A meter of an AI limit whose sign-in is what is wrong (`sign_in` of its `Reading`) starts the
+sign-in on a tap: `limit_sign_in` with its service, which runs `limits::sign_in`: the program's
+own sign-in (`claude auth login`, `codex login`, or `agy`, which signs in as it starts) in a
+console window of its own, out of any job so it outlives the call, and has the service asked
+every few seconds for three minutes (`HURRY` in `src/limits.rs`, 30 s for Antigravity). The
+settings window shows where each service stands with `limit_status` (`limits::status`: the last
+read; never read but named by a meter, `checking`, which its thread resolves within seconds; else
+its sign-in files and its program, no network), in the row of each meter of a limit, in its card
+and under each choice of *AI usage*. The card offers what can be done: *Connect* (`limit_sign_in`),
+*Check again* (`limit_check`, `limits::check_now`: asked within seconds) and *Install*
+(`limit_install`: the program's official page in the browser, `limits::install_page`). The window
+reads the states with the settings, when it comes to the front, every two seconds while one is
+`checking`, and every three seconds after *Connect* or *Check again*.
+
+**The settings window's pages.** Keys, Indicators (the meters), Nearby panels (the docked panels),
+Look, General, About, each a `section` of `ui/settings.html`; the UI words changed, the names in
+the code and the settings file did not. The rows of the three lists open a card: `editItem`,
+`editMeter` (a rename put onto the meter as the file has it now, Change through `addMeter` with
+`replacing`, which puts the new source in the old one's place), `editDocked` (the state and
+Remove). Only the cards remove.
 
 **Docking.** In the same half-second loop, while the capsule is shown, open and not carried,
 `follow_docked` in `src/main.rs` finds the window of each entry of `docked` among those that stay
@@ -242,11 +281,11 @@ when one is missing.
 open or close, so the window is sized), `fold`, `unfold`, `card` (the label opens or closes,
 so the region includes it), `move_item` (a key was carried to another place in the list),
 `move_meter` (a meter was carried to another place among the meters),
-`open_meter` (a tap on a meter of a program, with the meter's name and program), `set_divider` (the
+`open_meter` (a tap on a meter of a program, with the meter's name and program), `limit_sign_in` (a tap on a meter of an AI limit that needs a sign-in), `set_divider` (the
 divider was let go after a move: its place goes into the settings file), `resize` (the end grip is pressed, moved a cell, or let go without a move; nothing is saved),
 `set_length` (the end grip was let go: the cells go into the settings file).
 
-**Commands of the settings window** (the welcome window is the same page): `get_settings`, `set_pref`, `save_items`, `save_meters`,
+**Commands of the settings window** (the welcome window is the same page): `get_settings`, `set_pref`, `save_items`, `save_meters`, `move_meter` (a meter carried by its dots), `limit_status` (where each AI service stands), `limit_sign_in` (*Connect* in a meter's card or after choosing a service), `limit_check` (*Check again*), `limit_install` (*Install*),
 `dock_candidates` (the panels at the capsule's edge now, each window apart), `save_docked` (with
 the windows ticked), `use_path` (*Use it* on the card of a grey key), `installed_apps`, `pinned_apps`, `first_programs` (the programs the card of programs offers), `close_welcome` (the welcome window closes), `fit_welcome` (the welcome window's card is this tall), `running_programs`, `icon_of`, `import_icon`, `bundle_items`
 (a ready set), `save_key_set`, `open_key_set`, `key_set_items` (a key set in a file),
@@ -262,7 +301,7 @@ window to show), `rims` (the age of the items, and the items without a meter who
 taskbar progress, with the percent), `added` (`at`, the places of the keys the card of programs
 just added, which the capsule brings into view, and `tip`, the words it then says beside them),
 `meters` (the generation of the list, `readings`, the count of changes of the values, and, for
-each meter, `value`, `outer`, `hint`, `stale` and `notes`, or null where nothing was found), `stretch` (a drag of the end grip ended without a save:
+each meter, `value`, `outer`, `hint`, `rows`, `when`, `ago`, `problem` and `stale`, or null where nothing was found; `value` is null too for an AI limit never read, whose `problem` says why), `stretch` (a drag of the end grip ended without a save:
 what changed).
 
 # Setup by an agent

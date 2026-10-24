@@ -10,14 +10,14 @@
   :root{
     --bg:#161616;--s1:#2d2d2d;--s2:#363636;--s3:#3e3e3e;--field:#383838;--dlg:#1b1b1b;
     --ink:#fff;--ink-2:#d0d0d0;--dim:#a8a8a8;--sep:rgba(255,255,255,.07);--hi:inset 0 1px 0 rgba(255,255,255,.05);
-    --shade:rgba(0,0,0,.55);--key:#1c1d22;--key-ink:#e6e8ee;--danger:#ff99a4;
+    --shade:rgba(0,0,0,.55);--key:#1c1d22;--key-ink:#e6e8ee;--danger:#ff99a4;--warn:#ffb340;--ok:#6ccb5f;
     --pill:#0e0f12;--pill-key:#1c1d22;--pill-ink:#e6e8ee;
     --accent:#8ab4ff;--accent-fill:#1a6cff;--on-accent:#fff;
   }
   :root[data-theme=light]{
     --bg:#dedfe3;--s1:#fff;--s2:#f3f4f6;--s3:#e6e7ea;--field:#f3f4f6;--dlg:#ebecef;
     --ink:#16181b;--ink-2:#3c4047;--dim:#595e66;--sep:rgba(0,0,0,.08);--hi:inset 0 0 0 1px rgba(0,0,0,.04);
-    --shade:rgba(0,0,0,.3);--key:#eceef2;--key-ink:#2a2d34;--danger:#c42b1c;
+    --shade:rgba(0,0,0,.3);--key:#eceef2;--key-ink:#2a2d34;--danger:#c42b1c;--warn:#a85600;--ok:#0f7b0f;
     --pill:#eef0f4;--pill-key:#fff;--pill-ink:#2a2d34;
   }
   *{box-sizing:border-box}
@@ -53,6 +53,8 @@
   .sub{color:var(--dim);font-size:12.5px}
   .foot{color:var(--dim);font-size:12.5px;margin:10px 4px 0}
   .problem{color:var(--danger)!important}
+  .lbl small.warn,.lbl b.warn{color:var(--warn)}
+  .warn{color:var(--warn)}
 
   /* One button for the whole window; the accent fill only where the main step is */
   .btn{height:34px;padding:0 16px;border:0;border-radius:6px;background:var(--s3);white-space:nowrap}
@@ -95,17 +97,22 @@
   .key.big .sign{width:32px;height:32px}
   .key.small .sign{width:20px;height:20px}
   .key.plate img{box-sizing:content-box;padding:3px;border-radius:7px;background:var(--key-ink)}
-  #items .row{padding-left:4px;background:var(--s1)}
-  #items .row:hover{background:var(--s2)}
-  #items .row.carried{z-index:2;box-shadow:0 6px 18px var(--shade);border-radius:10px}
-  #items .row.carried::before{display:none}
+  #items .row,#meters .row{padding-left:4px;background:var(--s1)}
+  #items .row:hover,#meters .row:hover,#docked .row:hover{background:var(--s2)}
+  #items .row.carried,#meters .row.carried{z-index:2;box-shadow:0 6px 18px var(--shade);border-radius:10px}
+  #items .row.carried::before,#meters .row.carried::before{display:none}
+  #meters .row.broken{padding-left:26px}
   .grip{flex:none;align-self:stretch;width:28px;margin-right:-6px;display:grid;place-items:center;color:var(--dim);opacity:.6;touch-action:none;cursor:grab}
   .row:hover .grip{opacity:1}
   .grip svg{width:14px;height:14px}
   .chev{flex:none;width:16px;height:16px;color:var(--dim)}
   .tag{display:inline-block;padding:0 7px;border-radius:5px;background:var(--s3);color:var(--ink-2);font-size:11.5px;line-height:18px;margin-right:6px;vertical-align:1px}
-  #meters-head,#docked-head{margin:28px 0 8px}
-  #meters-head h2,#docked-head h2{margin:0 2px}
+  /* Where an AI service stands: a dot when connected, a spinner while it is being checked */
+  .state .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:6px;vertical-align:1px}
+  .state .spin{display:inline-block;width:10px;height:10px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;margin-right:6px;vertical-align:-1px;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .state.sign_in,.state.error,.state.missing{color:var(--warn)}
+  .does .btn{margin-left:auto}
   .tick{flex:none;width:20px;height:20px;border-radius:5px;box-shadow:inset 0 0 0 1px var(--dim);display:grid;place-items:center;color:var(--on-accent)}
   .tick svg{width:14px;height:14px;visibility:hidden}
   .on>.tick{background:var(--accent-fill);box-shadow:none}
@@ -202,6 +209,8 @@
 <div id="app">
   <nav id="side">
     <button class="nav on" data-s="items"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><path d="M16.75 13.5v6.5M13.5 16.75H20"/></svg><span data-t="nav_items"></span></button>
+    <button class="nav" data-s="meters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5a7.5 7.5 0 1 1 15 0"/><path d="M12 16.5l3.5-4.5M8.5 20h7"/></svg><span data-t="nav_meters"></span></button>
+    <button class="nav" data-s="docked"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="11" height="15" rx="2.5"/><rect x="17" y="4.5" width="3.5" height="15" rx="1.5"/></svg><span data-t="nav_docked"></span></button>
     <button class="nav" data-s="look"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 4v16"/><path d="M12 8h6.9M12 12h8M12 16h6.9"/></svg><span data-t="nav_look"></span></button>
     <button class="nav" data-s="general"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h9M17 17h3"/><circle cx="16" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="15" cy="17" r="2"/></svg><span data-t="nav_general"></span></button>
     <button class="nav" data-s="about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><path d="M12 7.6v.1"/></svg><span data-t="nav_about"></span></button>
@@ -214,10 +223,14 @@
       <div class="group" id="items"></div>
       <p class="foot" id="items-foot" data-t="items_foot"></p>
       <p class="foot" id="find-line"><button class="link" id="find" data-t="find"></button></p>
-      <div class="head" id="meters-head"><h2 data-t="meters"></h2><button class="btn" id="add-meter" data-t="meter_add"></button></div>
+    </section>
+    <section id="s-meters">
+      <div class="head" id="meters-head"><h1 data-t="nav_meters"></h1><button class="btn acc" id="add-meter" data-t="meter_add"></button></div>
       <div class="group" id="meters"></div>
       <p class="foot" id="meters-foot" data-t="meters_foot"></p>
-      <div class="head" id="docked-head"><h2 data-t="docked"></h2><button class="btn" id="add-docked" data-t="dock_add"></button></div>
+    </section>
+    <section id="s-docked">
+      <div class="head" id="docked-head"><h1 data-t="nav_docked"></h1><button class="btn acc" id="add-docked" data-t="dock_add"></button></div>
       <div class="group" id="docked"></div>
       <p class="foot" id="docked-foot" data-t="docked_foot"></p>
     </section>
@@ -280,13 +293,13 @@
 
   const T = {
     ru: {
-      nav_items: 'Пункты', nav_look: 'Вид', nav_general: 'Общие', nav_about: 'О программе',
+      nav_items: 'Клавиши', nav_meters: 'Индикаторы', nav_docked: 'Соседние панели', nav_look: 'Вид', nav_general: 'Общие', nav_about: 'О программе',
       add: 'Добавить', undo: 'Отменить', open: 'Открыть', save: 'Сохранить', cancel: 'Отмена', more: 'Подробнее',
       find: 'Найти мои программы', find_sub: 'Отмеченные станут клавишами капсулы. Лишнюю снимите касанием.',
       find_none: 'Своих программ не нашлось. Добавить их можно в настройках кнопкой «Добавить».', not_now: 'Не сейчас', close: 'Закрыть',
       items_foot: 'Чтобы поменять порядок, перетащите строку за точки слева.',
-      empty: 'Пунктов пока нет. Нажмите «Добавить».', file_error: 'Файл настроек не читается, пункты не изменены',
-      remove: 'Удалить', removed: 'Пункт удалён: ', broken: 'Пункт не работает: коснитесь, чтобы исправить', broken_card: 'Пункт не работает',
+      empty: 'Клавиш пока нет. Нажмите «Добавить».', file_error: 'Файл настроек не читается, клавиши не изменены',
+      remove: 'Удалить', removed: 'Клавиша удалена: ', broken: 'Клавиша не работает: коснитесь, чтобы исправить', broken_card: 'Клавиша не работает',
       lost: 'Программа не найдена', path_updated: 'Путь обновлён: ', found_in: 'Нашлась в ', use_it: 'Подставить',
       card_busy: 'Сначала сохраните или закройте открытую карточку',
       line_app: 'Программа', line_site: 'Сайт', line_link: 'Ссылка', line_folder: 'Папка', line_file: 'Файл', line_keys: 'Сочетание ',
@@ -301,12 +314,12 @@
       updates: 'Обновления', update_check: 'Проверить', update_go: 'Обновить',
       update_none: 'Ещё не проверялись', update_off: 'Проверка выключена', update_checking: 'Проверяю…', update_latest: 'Установлена последняя',
       update_found: 'Доступна версия ', update_failed: 'Проверить не удалось', update_loading: 'Скачиваю и ставлю обновление…',
-      expert: 'Для опытных', file: 'Файл настроек', file_sub: 'Все пункты и настройки одним файлом', log: 'Журнал', log_sub: 'Лежит только на этом компьютере',
+      expert: 'Для опытных', file: 'Файл настроек', file_sub: 'Все клавиши и настройки одним файлом', log: 'Журнал', log_sub: 'Лежит только на этом компьютере',
       about_sub: 'Сенсорная панель для Windows 11 · лицензия MIT',
       privacy: 'Что панель делает',
       privacy_1: 'Нажимает клавиши в окне, где вы работали, когда вы касаетесь клавиши капсулы',
       privacy_2: 'Дважды в секунду смотрит список окон, чтобы отметить запущенные программы',
-      privacy_3: 'Не записывает, что вы печатаете, и не собирает статистику. В сеть выходит только проверить обновления',
+      privacy_3: 'Не записывает, что вы печатаете, и не собирает статистику. В сеть выходит проверить обновления и, если есть индикатор «Расход ИИ», узнать расход',
       add_title: 'Добавить', kind_app: 'Программа', kind_app_sub: 'С панели задач и из «Пуска»',
       kind_action: 'Действие Windows', kind_action_sub: 'Снимок, вставка, диктовка, страницы Параметров',
       kind_open: 'Сайт или файл', kind_open_sub: 'Адрес сайта, документ или папка',
@@ -319,7 +332,7 @@
       keys_press: 'Нажмите сочетание на клавиатуре. Без клавиатуры соберите кнопками:', key: 'Клавиша',
       does: 'Что делает', does_app: 'Открывает программу', does_app_sub: 'Значок и метка запуска берутся из неё', does_site: 'Открывает сайт', does_link: 'Открывает ссылку',
       does_folder: 'Открывает папку', does_file: 'Открывает файл', does_page: 'Открывает страницу Параметров', does_keys: 'Нажимает', does_hold: 'Держит клавишу нажатой', does_hold_sub: 'До второго касания',
-      icon: 'Значок', icon_auto: 'Из программы', icon_none: 'Без значка', icon_kind: 'По виду пункта', icon_builtin: 'Встроенный', icon_own: 'Свой файл…', icon_own_on: 'Свой файл',
+      icon: 'Значок', icon_auto: 'Из программы', icon_none: 'Без значка', icon_kind: 'По виду клавиши', icon_builtin: 'Встроенный', icon_own: 'Свой файл…', icon_own_on: 'Свой файл',
       icon_change: 'Сменить…', icon_fold: 'Свернуть', edit_title: 'Изменить',
       need_name: 'Нужно название', need_target: 'Нужен адрес или путь', need_key: 'Выберите клавишу', need_program: 'Выберите программу',
       only_in: 'Где показывать', only_everywhere: 'Везде', only_one: 'В одной программе', no_programs: 'Сейчас нет программ с окнами',
@@ -330,30 +343,47 @@
       set_not: 'Это не набор клавиш Tapka',
       set_large: 'Клавиш слишком много для одного файла: в набор входит не больше 200',
       set_taken: 'Файл с таким именем и окончанием .tapka уже есть. Выберите другое имя',
-      meters: 'Шкалы', meter_add: 'Добавить шкалу', meters_empty: 'Шкал нет. Шкала показывает прогресс программы или число из файла',
-      meters_foot: 'Шкалы стоят в капсуле под клавишами. Черту между клавишами и шкалами можно тянуть пальцем.',
+      meter_add: 'Добавить индикатор', meters_empty: 'Индикаторов пока нет. Индикатор показывает прогресс программы или расход ИИ.',
+      meters_foot: 'Порядок можно менять и в капсуле долгим нажатием. Черту между клавишами и индикаторами можно тянуть пальцем.',
       meter_app: 'Программа', meter_app_sub: 'Панель сама найдёт прогресс на панели задач или в окнах программы',
-      meter_file: 'Файл', meter_file_sub: 'Текстовый файл с числом от 0 до 100',
-      meter_line_app: 'Прогресс программы', meter_line_file: 'Число из файла ', meter_removed: 'Шкала удалена: ',
-      meter_broken: 'Шкала не работает: удалите её или исправьте файл настроек',
-      privacy_4: 'Читает прогресс с панели задач для программ ваших клавиш и шкал, из окон программ, которые вы выбрали для шкал, и файл, который вы выбрали',
-      privacy_6: 'Если программа клавиши, шкалы или панели пропала, ищет её файл в «Пуске», среди запущенных программ и в соседних папках',
-      docked: 'Стыковка', dock_add: 'Пристыковать панель', docked_empty: 'Пристыкованных панелей нет. Панель другой программы у того же края можно поставить под капсулу',
+      meter_file: 'Файл', meter_file_sub: 'Для опытных: текстовый файл с числом от 0 до 100',
+      meter_limit: 'Расход ИИ', meter_limit_sub: 'Claude, ChatGPT или Antigravity: сколько израсходовано',
+      limit_claude: 'Claude', limit_claude_sub: 'Аккаунт Claude',
+      limit_chatgpt: 'ChatGPT', limit_chatgpt_sub: 'Аккаунт ChatGPT',
+      limit_antigravity_gemini: 'Antigravity · Gemini', limit_antigravity_gemini_sub: 'Antigravity, модели Gemini',
+      limit_antigravity_claude: 'Antigravity · Claude и GPT', limit_antigravity_claude_sub: 'Antigravity, модели Claude и GPT',
+      meter_gone: 'Индикатор изменился, пока карточка была открыта: ничего не сохранено', meter_removed: 'Индикатор удалён: ', meter_broken: 'Индикатор не работает: удалите его или исправьте файл настроек',
+      meter_source: 'Источник', meter_change: 'Сменить', meter_change_title: 'Сменить источник', st_title: 'Подключение',
+      st_ok: 'Подключено', st_sign_in: 'Не подключено', st_error: 'Не удалось проверить', st_missing: 'Программа не найдена',
+      st_checking: 'Проверяем…', st_unknown: 'Подключится при добавлении', st_connect: 'Подключить', st_again: 'Проверить ещё', st_install: 'Установить',
+      connect_web: 'Откроется официальный вход {service} в браузере. Войдите как обычно, и индикатор оживёт сам.',
+      connect_window: 'Откроется и служебное окно, оно закроется само после входа.',
+      connect_agy: 'Откроется окно Antigravity. Войдите в нём, потом его можно закрыть.',
+      privacy_4: 'Читает прогресс с панели задач для программ ваших клавиш и индикаторов, из окон программ, которые вы выбрали для индикаторов, и файл, который вы выбрали',
+      privacy_6: 'Если программа клавиши, индикатора или панели пропала, ищет её файл в «Пуске», среди запущенных программ и в соседних папках',
+      privacy_7: 'Для индикатора «Расход ИИ», пока он есть, читает сохранённый на этом компьютере вход в аккаунт Claude или ChatGPT и спрашивает расход у Anthropic или OpenAI, а для Antigravity запускает без окна его программу. «Подключить» открывает официальный вход: пароль Tapka не видит',
+      dock_add: 'Добавить панель', docked_empty: 'Соседних панелей пока нет. Панель другой программы у того же края можно поставить под капсулу.',
       docked_foot: 'Tapka ставит выбранные панели под капсулой и ведёт их вместе с ней.',
-      dock_line: 'Стоит под капсулой', dock_back: 'Возвращается на своё место, Tapka её не двигает', dock_removed: 'Панель отстыкована: ',
-      dock_title: 'Панели у края капсулы', dock_go: 'Пристыковать', dock_pick: 'Отметьте панели, которые пристыковать',
+      dock_line: 'Стоит под капсулой', dock_back: 'Держит своё место сама, Tapka не может её сдвинуть', dock_removed: 'Панель убрана: ', dock_remove: 'Убрать',
+      dock_title: 'Панели у края капсулы', dock_go: 'Добавить', dock_pick: 'Отметьте панели, которые добавить',
       dock_none: 'У края капсулы сейчас нет панелей других программ поверх окон', dock_loading: 'Ищу панели у края…',
-      dock_refused: 'Windows не даёт Tapka её двигать', dock_several: 'Несколько окон — выберите заново', dock_missing: 'Программа не найдена', dock_broken: 'Запись не работает: удалите её или исправьте файл настроек',
-      privacy_5: 'Двигает только окна программ, которые вы пристыковали, и смотрит, где стоят окна поверх всех',
+      dock_refused: 'Windows не разрешает её сдвинуть', dock_several: 'Несколько окон — выберите заново', dock_missing: 'Программа не найдена', dock_broken: 'Запись не работает',
+      dock_line_why: 'Tapka ставит панель под капсулой и ведёт её вместе с ней.',
+      dock_back_why: 'Панель сама возвращается на своё место, поэтому Tapka её больше не двигает.',
+      dock_refused_why: 'Windows не разрешает Tapka двигать её окно, например когда программа запущена от имени администратора.',
+      dock_several_why: 'У программы несколько таких окон. Уберите панель и добавьте её снова, выбрав нужное окно.',
+      dock_missing_why: 'Программа этой панели не найдена на компьютере.',
+      dock_broken_why: 'Запись в файле настроек не читается: уберите её или исправьте файл.',
+      privacy_5: 'Двигает только окна соседних панелей, которые вы добавили, и смотрит, где стоят окна поверх всех',
     },
     en: {
-      nav_items: 'Items', nav_look: 'Look', nav_general: 'General', nav_about: 'About',
+      nav_items: 'Keys', nav_meters: 'Indicators', nav_docked: 'Nearby panels', nav_look: 'Look', nav_general: 'General', nav_about: 'About',
       add: 'Add', undo: 'Undo', open: 'Open', save: 'Save', cancel: 'Cancel', more: 'Details',
       find: 'Find my programs', find_sub: 'The ticked ones become capsule keys. Tap one to untick it.',
       find_none: 'No programs of yours were found. Add them in the settings with Add.', not_now: 'Not now', close: 'Close',
       items_foot: 'To change the order, drag a row by the dots on its left.',
-      empty: 'No items yet. Press Add.', file_error: 'The settings file cannot be read; the items are unchanged',
-      remove: 'Remove', removed: 'Item removed: ', broken: 'This item does not work: tap to fix it', broken_card: 'This item does not work',
+      empty: 'No keys yet. Press Add.', file_error: 'The settings file cannot be read; the keys are unchanged',
+      remove: 'Remove', removed: 'Key removed: ', broken: 'This key does not work: tap to fix it', broken_card: 'This key does not work',
       lost: 'Program not found', path_updated: 'Path updated: ', found_in: 'Found in ', use_it: 'Use it',
       card_busy: 'Save or close the open card first',
       line_app: 'Program', line_site: 'Website', line_link: 'Link', line_folder: 'Folder', line_file: 'File', line_keys: 'Shortcut ',
@@ -368,12 +398,12 @@
       updates: 'Updates', update_check: 'Check', update_go: 'Update',
       update_none: 'Not checked yet', update_off: 'Checks are off', update_checking: 'Checking…', update_latest: 'You have the latest',
       update_found: 'Version available: ', update_failed: 'Could not check', update_loading: 'Downloading and installing the update…',
-      expert: 'Advanced', file: 'Settings file', file_sub: 'All items and settings in one file', log: 'Log', log_sub: 'Stays on this computer only',
+      expert: 'Advanced', file: 'Settings file', file_sub: 'All keys and settings in one file', log: 'Log', log_sub: 'Stays on this computer only',
       about_sub: 'A touch panel for Windows 11 · MIT licence',
       privacy: 'What the panel does',
       privacy_1: 'Presses keys in the window you were working in when you tap a capsule key',
       privacy_2: 'Twice a second looks at the list of windows to mark the programs that are running',
-      privacy_3: 'Does not record what you type and collects no statistics. Goes online only to check for updates',
+      privacy_3: 'Does not record what you type and collects no statistics. Goes online to check for updates and, with an AI usage indicator, to ask for the usage',
       add_title: 'Add', kind_app: 'Program', kind_app_sub: 'From the taskbar and the Start menu',
       kind_action: 'Windows action', kind_action_sub: 'Snip, paste, dictation, Settings pages',
       kind_open: 'Website or file', kind_open_sub: 'A site address, a document or a folder',
@@ -386,7 +416,7 @@
       keys_press: 'Press the shortcut on a keyboard. Without one, build it with the buttons:', key: 'Key',
       does: 'What it does', does_app: 'Opens a program', does_app_sub: 'The icon and the running mark come from it', does_site: 'Opens a website', does_link: 'Opens a link',
       does_folder: 'Opens a folder', does_file: 'Opens a file', does_page: 'Opens a Settings page', does_keys: 'Presses', does_hold: 'Holds a key down', does_hold_sub: 'Until the next tap',
-      icon: 'Icon', icon_auto: 'From the program', icon_none: 'No icon', icon_kind: 'By the kind of item', icon_builtin: 'Built-in', icon_own: 'Custom file…', icon_own_on: 'Custom file',
+      icon: 'Icon', icon_auto: 'From the program', icon_none: 'No icon', icon_kind: 'By the kind of key', icon_builtin: 'Built-in', icon_own: 'Custom file…', icon_own_on: 'Custom file',
       icon_change: 'Change…', icon_fold: 'Fold', edit_title: 'Edit',
       need_name: 'Enter a name', need_target: 'Enter an address or a path', need_key: 'Choose a key', need_program: 'Choose a program',
       only_in: 'Where to show', only_everywhere: 'Everywhere', only_one: 'In one program', no_programs: 'No program has a window right now',
@@ -397,21 +427,38 @@
       set_not: 'This is not a Tapka key set',
       set_large: 'Too many keys for one file: a set holds 200 at most',
       set_taken: 'A .tapka file with this name is already there. Choose another name',
-      meters: 'Meters', meter_add: 'Add a meter', meters_empty: 'No meters. A meter shows a program\'s progress or a number from a file',
-      meters_foot: 'Meters sit in the capsule under the keys. Drag the line between the keys and the meters with a finger.',
+      meter_add: 'Add an indicator', meters_empty: 'No indicators yet. An indicator shows a program\'s progress or AI usage.',
+      meters_foot: 'The order can also be changed on the capsule with a long press. Drag the line between the keys and the indicators with a finger.',
       meter_app: 'Program', meter_app_sub: 'The panel finds the progress on the taskbar or in the program\'s windows',
-      meter_file: 'File', meter_file_sub: 'A text file with a number from 0 to 100',
-      meter_line_app: 'Program progress', meter_line_file: 'Number from the file ', meter_removed: 'Meter removed: ',
-      meter_broken: 'This meter does not work: remove it or fix the settings file',
-      privacy_4: 'Reads progress from the taskbar for the programs of your keys and meters, from the windows of the programs you chose for meters, and the file you chose',
-      privacy_6: 'When the program of a key, a meter or a panel is gone, looks for its file in Start, among running programs and in nearby folders',
-      docked: 'Docking', dock_add: 'Dock a panel', docked_empty: 'No docked panels. A panel of another program at the same edge can stand under the capsule',
+      meter_file: 'File', meter_file_sub: 'Advanced: a text file with a number from 0 to 100',
+      meter_limit: 'AI usage', meter_limit_sub: 'Claude, ChatGPT or Antigravity: how much is used',
+      limit_claude: 'Claude', limit_claude_sub: 'Claude account',
+      limit_chatgpt: 'ChatGPT', limit_chatgpt_sub: 'ChatGPT account',
+      limit_antigravity_gemini: 'Antigravity · Gemini', limit_antigravity_gemini_sub: 'Antigravity, Gemini models',
+      limit_antigravity_claude: 'Antigravity · Claude and GPT', limit_antigravity_claude_sub: 'Antigravity, Claude and GPT models',
+      meter_gone: 'The indicator changed while its card was open: nothing was saved', meter_removed: 'Indicator removed: ', meter_broken: 'This indicator does not work: remove it or fix the settings file',
+      meter_source: 'Source', meter_change: 'Change', meter_change_title: 'Change the source', st_title: 'Connection',
+      st_ok: 'Connected', st_sign_in: 'Not connected', st_error: 'Could not check', st_missing: 'Program not found',
+      st_checking: 'Checking…', st_unknown: 'Connects when added', st_connect: 'Connect', st_again: 'Check again', st_install: 'Install',
+      connect_web: 'The official {service} sign-in opens in the browser. Sign in as usual and the indicator comes alive by itself.',
+      connect_window: 'A helper window opens too; it closes by itself after you sign in.',
+      connect_agy: 'An Antigravity window opens. Sign in there; then it can be closed.',
+      privacy_4: 'Reads progress from the taskbar for the programs of your keys and indicators, from the windows of the programs you chose for indicators, and the file you chose',
+      privacy_6: 'When the program of a key, an indicator or a panel is gone, looks for its file in Start, among running programs and in nearby folders',
+      privacy_7: 'For an AI usage indicator, while it exists, reads the Claude or ChatGPT account sign-in saved on this computer and asks Anthropic or OpenAI for the usage, and for Antigravity runs its program without a window. Connect opens the official sign-in: Tapka never sees the password',
+      dock_add: 'Add a panel', docked_empty: 'No nearby panels yet. A panel of another program at the same edge can stand under the capsule.',
       docked_foot: 'Tapka puts the chosen panels under the capsule and carries them along.',
-      dock_line: 'Stands under the capsule', dock_back: 'Returns to its own place, Tapka leaves it alone', dock_removed: 'Panel undocked: ',
-      dock_title: 'Panels at the capsule\'s edge', dock_go: 'Dock', dock_pick: 'Tick the panels to dock',
+      dock_line: 'Stands under the capsule', dock_back: 'Keeps its own place, Tapka cannot move it', dock_removed: 'Panel removed: ', dock_remove: 'Remove',
+      dock_title: 'Panels at the capsule\'s edge', dock_go: 'Add', dock_pick: 'Tick the panels to add',
       dock_none: 'No always-on-top panel of another program is at the capsule\'s edge right now', dock_loading: 'Looking for panels at the edge…',
-      dock_refused: 'Windows does not let Tapka move it', dock_several: 'Several windows — pick again', dock_missing: 'Program not found', dock_broken: 'This entry does not work: remove it or fix the settings file',
-      privacy_5: 'Moves only the windows of the programs you docked, and looks where always-on-top windows stand',
+      dock_refused: 'Windows does not allow moving it', dock_several: 'Several windows — pick again', dock_missing: 'Program not found', dock_broken: 'This entry does not work',
+      dock_line_why: 'Tapka puts the panel under the capsule and carries it along.',
+      dock_back_why: 'The panel goes back to its own place by itself, so Tapka no longer moves it.',
+      dock_refused_why: 'Windows does not let Tapka move its window, for example when the program runs as administrator.',
+      dock_several_why: 'The program has several such windows. Remove the panel and add it again, picking the right window.',
+      dock_missing_why: 'The program of this panel is not on this computer.',
+      dock_broken_why: 'The entry in the settings file cannot be read: remove it or fix the file.',
+      privacy_5: 'Moves only the windows of the nearby panels you added, and looks where always-on-top windows stand',
     },
   };
   let S = null;            // what Rust last said about the settings
@@ -431,6 +478,7 @@
     eye: line('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>'),
     tick: line('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
     shield: line('<path d="M12 3 4.5 6v5.5c0 4.5 3.2 8 7.5 9.5 4.3-1.5 7.5-5 7.5-9.5V6z"/>'),
+    limit: line('<path d="M4.5 16.5a7.5 7.5 0 1 1 15 0"/><path d="M12 16.5l3.5-4.5M8.5 20h7"/>'),
   };
   for (const [id, icon] of [['back', 'back'], ['close', 'x']]) $(id).innerHTML = ICON[icon];
   // The welcome window of the first run is this page too, opened as settings.html#welcome
@@ -471,7 +519,7 @@
     document.documentElement.lang = lang;
     for (const e of document.querySelectorAll('[data-t]')) e.textContent = t(e.dataset.t);
     for (const b of $('edge').children) b.title = t('edge_' + b.dataset.v);
-    $('privacy').replaceChildren(...[['send', 'privacy_1'], ['eye', 'privacy_2'], ['eye', 'privacy_4'], ['eye', 'privacy_5'], ['eye', 'privacy_6'], ['shield', 'privacy_3']].map(([icon, key]) =>
+    $('privacy').replaceChildren(...[['send', 'privacy_1'], ['eye', 'privacy_2'], ['eye', 'privacy_4'], ['eye', 'privacy_5'], ['eye', 'privacy_6'], ['eye', 'privacy_7'], ['shield', 'privacy_3']].map(([icon, key]) =>
       el('div', { className: 'row' }, svgKey(ICON[icon], 'small'), el('div', { className: 'lbl' }, el('b', { textContent: t(key), style: 'font-size:13.5px' })))));
     document.title = 'Tapka — ' + t('nav_' + document.querySelector('.nav.on').dataset.s);
   }
@@ -675,7 +723,7 @@
   }
   $('find').onclick = () => { const [words, chips, acts] = programCard(closeDialog); dialog(t('find'), [words, chips], [acts], true); };
 
-  // ---------- the meters: each reads a program the user chose or a file the user chose
+  // ---------- the meters: each reads a program the user chose, a file the user chose or an AI limit
   const meterRaws = () => S.meters.map(m => m.raw);
   // The list on the page changes at once; when the file could not be written it goes back to what
   // it was and is read again, so the page never shows a list the panel does not follow, and the
@@ -686,16 +734,84 @@
     drawMeters();
     return invoke('save_meters', { meters: list }).catch(e => { S.meters = before; drawMeters(); toast(String(e)); return refresh(); });
   }
-  // A meter is told by where its number comes from: a program, or a file by its name only
+  // A meter is told by where its number comes from: a program, a file by its name only, or a service
+  const LIMITS = ['claude', 'chatgpt', 'antigravity-gemini', 'antigravity-claude'];
+  const limitWords = (limit, sub = '') => t('limit_' + limit.replace('-', '_') + sub);
+  // The program to install for a service, and the account a person signs in to
+  const PROGRAMS = { claude: 'Claude Code', chatgpt: 'Codex', 'antigravity-gemini': 'Antigravity', 'antigravity-claude': 'Antigravity' };
+  const SERVICES = { claude: 'Claude', chatgpt: 'ChatGPT', 'antigravity-gemini': 'Antigravity', 'antigravity-claude': 'Antigravity' };
+  // Where each AI service stands (`limit_status`): read with the settings, when the window comes to
+  // the front, every two seconds while one is being checked, and every three after Connect or
+  // Check again
+  let limitStatus = {}, watchTimer = null, checkTimer = null, limitChoices = null, meterState = null, replacing = null;
+  function readStatus() {
+    return invoke('limit_status').then(found => {
+      limitStatus = found || {};
+      drawMeters(); drawLimitChoices(); drawMeterState();
+      clearTimeout(checkTimer);
+      if (Object.values(limitStatus).some(st => st.state === 'checking')) checkTimer = setTimeout(readStatus, 2000);
+    }).catch(() => {});
+  }
+  window.addEventListener('focus', readStatus);
+  function watchStatus(ms) {
+    const until = Date.now() + ms;
+    clearInterval(watchTimer);
+    watchTimer = setInterval(() => { if (Date.now() > until) clearInterval(watchTimer); readStatus(); }, 3000);
+  }
+  function statusWords(limit) {
+    const st = (limitStatus[limit] || {}).state;
+    if (!st) return null;
+    const words = el('span', { className: 'state ' + st });
+    if (st === 'ok') words.append(el('i', { className: 'dot' }));
+    if (st === 'checking') words.append(el('i', { className: 'spin' }));
+    words.append(t('st_' + st));
+    return words;
+  }
+  // What can be done about where a service stands: connect, check again, install; nothing when it
+  // is connected or being checked
+  function statusAction(limit) {
+    const st = (limitStatus[limit] || {}).state;
+    if (st === 'sign_in') return btn('st_connect', () => offerSignIn(limit));
+    if (st === 'error') return btn('st_again', () => invoke('limit_check', { service: limit }).then(() => watchStatus(60000)).catch(e => toast(String(e))));
+    if (st === 'missing') return el('button', { className: 'btn', textContent: t('st_install') + ' ' + PROGRAMS[limit], onclick: () => invoke('limit_install', { service: limit }).catch(e => toast(String(e))) });
+    return null;
+  }
+  function offerSignIn(limit) {
+    const words = limit.startsWith('antigravity') ? [t('connect_agy')] : [t('connect_web').replace('{service}', SERVICES[limit]), t('connect_window')];
+    dialog(limitWords(limit), [el('div', { className: 'say' }, ...words.map(w => el('p', { textContent: w, style: 'margin:0 0 8px' })))],
+      [spring(), btn('not_now', closeDialog), btn('st_connect', () => { closeDialog(); signIn(limit); }, 'acc')]);
+  }
+  function signIn(limit) {
+    // One already open is not opened twice; Rust says so in words
+    return invoke('limit_sign_in', { service: limit }).then(open => { if (open) toast(open); watchStatus(180000); }).catch(e => toast(String(e)));
+  }
+  // What the subtitle names a program by: its file without .exe, or the app of a Start menu address
+  function programName(target) {
+    const last = target.split(/[\\/]/).pop();
+    return /^shell:appsfolder/i.test(target) ? last.split('!')[0].split('_')[0].split('.').pop() : last.replace(/\.exe$/i, '');
+  }
+  // A meter's kind and what it reads, for its row and its card
+  function meterSource(raw) {
+    const f = fields(raw), file = str(f.file).trim(), limit = str(f.limit).trim().toLowerCase();
+    if (file) return { kind: 'meter_file', icon: ICON.file, what: file.split(/[\\/]/).pop() };
+    if (limit) return { kind: 'meter_limit', icon: ICON.limit, what: LIMITS.includes(limit) ? limitWords(limit) : limit, limit: LIMITS.includes(limit) ? limit : null };
+    return { kind: 'meter_app', icon: ICON.app, what: programName(str(f.program).trim()) };
+  }
+  // A row as a key's: its dots, its picture, its name, what it reads and, for an AI service, where it
+  // stands; the arrow opens its card
   function drawMeters() {
-    $('meters').hidden = $('meters-head').hidden = $('meters-foot').hidden = !!S.error;
+    // A meter being carried keeps its row until it is let go
+    if (carried && carried.list === $('meters')) return;
+    $('meters').hidden = $('meters-foot').hidden = !!S.error;
     const rows = S.meters.map((m, i) => {
-      const file = str(fields(m.raw).file).trim();
-      const sub = m.problem ? el('small', { className: 'problem ell', textContent: t('meter_broken') })
-        : el('small', { className: 'ell', textContent: file ? t('meter_line_file') + file.split(/[\\/]/).pop() : t('meter_line_app') });
-      const key = m.icon ? el('span', { className: 'key' }, picture(m.icon)) : svgKey(file ? ICON.file : ICON.app);
-      return el('div', { className: 'row meter' }, key, el('span', { className: 'lbl' }, el('b', { className: 'ell', textContent: nameOf(m.raw) }), sub),
-        btn('remove', () => removeMeter(i), 'danger'));
+      const src = meterSource(m.raw), status = src.limit && !m.problem && statusWords(src.limit);
+      const sub = m.problem ? el('small', { className: 'warn ell', textContent: t('meter_broken') })
+        : el('small', { className: 'ell' }, t(src.kind) + ' · ' + src.what, ...(status ? [' · ', status] : []));
+      const key = m.icon ? el('span', { className: 'key' }, picture(m.icon)) : svgKey(src.icon);
+      // A broken meter the panel skips has no place among the meters to be carried to
+      const grip = m.problem ? [] : [el('span', { className: 'grip', innerHTML: ICON.grip })];
+      return el('button', { className: 'row meter' + (m.problem ? ' broken' : ''), onclick: e => { if (!e.target.closest('.grip')) editMeter(i); } },
+        ...grip, key, el('span', { className: 'lbl' }, el('b', { className: 'ell', textContent: nameOf(m.raw) }), sub), el('span', { className: 'chev', innerHTML: ICON.chev }));
     });
     $('meters').replaceChildren(...(rows.length ? rows : [say('meters_empty')]));
   }
@@ -704,18 +820,102 @@
     toast(t('meter_removed') + nameOf(before[i]), () => saveMeters(before));
     saveMeters(before.filter((_, n) => n !== i));
   }
-  function appendMeter(raw) { closeDialog(); return saveMeters([...meterRaws(), raw]); }
-  // A program from the same list as a new key's, or a file from a Windows dialog
+  // A new meter goes last; one whose source is being changed (`replacing`: its place and the meter as
+  // drawn) keeps its place, its name and its own fields, and takes the new source in place of the old.
+  // The list may have changed while the choices were open: the meter is looked for again in the file
+  // as it is now, at its place first, and with no such meter nothing is changed
+  function appendMeter(raw) {
+    closeDialog();
+    if (replacing == null) return saveMeters([...meterRaws(), raw]);
+    const drawn = replacing;
+    replacing = null;
+    return refresh().then(() => {
+      const at = meterAt(drawn);
+      if (at < 0) return toast(t('meter_gone'));
+      const list = meterRaws();
+      const kept = Object.entries(fields(list[at])).filter(([k]) => !['program', 'app', 'file', 'limit'].includes(k));
+      list[at] = Object.fromEntries([...kept, ...Object.entries(raw).filter(([k]) => k !== 'name')]);
+      return saveMeters(list);
+    });
+  }
+  // Where a meter drawn at `at` as `raw` is now: there, if the entry there is still that one; else
+  // the only entry like it; else nowhere
+  function meterAt({ at, raw }) {
+    const same = m => JSON.stringify(m.raw) === JSON.stringify(raw);
+    if (S.meters[at] && same(S.meters[at])) return at;
+    const like = S.meters.map((m, i) => same(m) ? i : -1).filter(i => i >= 0);
+    return like.length === 1 ? like[0] : -1;
+  }
+  // A meter's card: its name, its source with Change, for an AI service where it stands and what
+  // can be done, and Remove. A rename is put onto the meter as the file has it now
+  function editMeter(i) {
+    const m = S.meters[i], raw = fields(m.raw), src = meterSource(m.raw);
+    const remove = btn('remove', () => { closeDialog(); removeMeter(i); }, 'danger');
+    if (m.problem) return dialog(nameOf(m.raw), [el('div', { className: 'does' }, el('span', { className: 'lbl' }, el('b', { className: 'warn', textContent: t('meter_broken') }))),
+      el('div', { className: 'why', textContent: m.problem })], [remove, spring(), btn('close', closeDialog)], true);
+    const name = text(str(raw.name));
+    const big = m.icon ? el('span', { className: 'key big' }, picture(m.icon)) : svgKey(src.icon, 'big');
+    const source = el('div', { className: 'does' }, el('span', { className: 'lbl' }, el('b', { textContent: t(src.kind) }), el('small', { className: 'ell', textContent: src.what })),
+      btn('meter_change', () => { replacing = { at: i, raw: m.raw }; addMeter(); }));
+    meterState = src.limit ? { node: el('div', { className: 'does', id: 'meter-state' }), limit: src.limit } : null;
+    drawMeterState();
+    const done = btn('save', () => {
+      const now = name.value.trim();
+      if (!now) return toast(t('need_name'));
+      closeDialog();
+      if (now === str(raw.name).trim()) return;
+      refresh().then(() => {
+        // The entry at the place drawn, if it is still the one drawn: of two alike, the one touched
+        const at = S.meters[i] && JSON.stringify(S.meters[i].raw) === JSON.stringify(m.raw) ? i : -1;
+        if (at < 0) return toast(t('meter_gone'));
+        const list = meterRaws();
+        list[at] = { ...fields(list[at]), name: now };
+        saveMeters(list);
+      });
+    }, 'acc');
+    dialog(t('edit_title'), [el('div', { className: 'namebox' }, big, name), field(t('meter_source'), source), ...(meterState ? [field(t('st_title'), meterState.node)] : [])],
+      [remove, spring(), btn('cancel', closeDialog), done], true);
+    cardEdits = () => name.value !== str(raw.name);
+  }
+  function drawMeterState() {
+    if (!meterState) return;
+    const words = statusWords(meterState.limit), act = statusAction(meterState.limit);
+    meterState.node.replaceChildren(el('span', { className: 'lbl' }, el('b', {}, ...(words ? [words] : []))), ...(act ? [act] : []));
+  }
+  // A program from the same list as a new key's, an AI service, or, for the advanced, a file from a
+  // Windows dialog. The same choices change the source of a meter in its card
   function addMeter() {
     const file = () => window.__TAURI__.dialog.open({ multiple: false }).then(path => {
       if (path) appendMeter({ name: path.replace(/[\\/]+$/, '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '') || path, file: path });
     });
-    const kinds = [['meter_app', svgKey(ICON.app), () => { steps.push(addMeter); programList(t('meter_app'), a => appendMeter({ name: a.name, program: a.target, ...(a.app ? { app: a.app } : {}) }));
- }],
+    const kinds = [['meter_app', svgKey(ICON.app), () => { steps.push(addMeter); programList(t('meter_app'), a => appendMeter({ name: a.name, program: a.target, ...(a.app ? { app: a.app } : {}) })); }],
+      ['meter_limit', svgKey(ICON.limit), () => { steps.push(addMeter); addLimit(); }],
       ['meter_file', svgKey(ICON.file), file]];
-    dialog(t('meter_add'), [el('div', { className: 'group' }, ...kinds.map(([kind, key, go]) => pick(key, t(kind), t(kind + '_sub'), go)))], [], true);
+    dialog(t(replacing == null ? 'meter_add' : 'meter_change_title'), [el('div', { className: 'group' }, ...kinds.map(([kind, key, go]) => pick(key, t(kind), t(kind + '_sub'), go)))], [], true);
   }
-  $('add-meter').onclick = addMeter;
+  // The four services, each with where it stands; one that is not connected is added and offers to
+  // connect
+  function addLimit() {
+    limitChoices = el('div', { className: 'group' });
+    drawLimitChoices();
+    dialog(t('meter_limit'), [limitChoices]);
+    readStatus();
+  }
+  function drawLimitChoices() {
+    if (!limitChoices || !limitChoices.isConnected && limitChoices.childElementCount) return;
+    limitChoices.replaceChildren(...LIMITS.map(limit => {
+      const row = pick(svgKey(ICON.limit), limitWords(limit), limitWords(limit, '_sub'), () => chooseLimit(limit));
+      const status = statusWords(limit);
+      if (status) row.querySelector('.lbl').append(el('small', { className: 'ell' }, status));
+      return row;
+    }));
+  }
+  function chooseLimit(limit) {
+    const offer = (limitStatus[limit] || {}).state === 'sign_in';
+    appendMeter({ name: limitWords(limit), limit });
+    if (offer) offerSignIn(limit);
+  }
+  $('add-meter').onclick = () => { replacing = null; addMeter(); };
 
   // ---------- docking: panels of other programs, each told by its program's path and its window
   // class, stand under the capsule. An entry of an older version is the program's file name alone
@@ -740,15 +940,22 @@
   const programKey = p => p.icon ? el('span', { className: 'key' }, picture(p.icon)) : svgKey(ICON.app);
   const DOCK_LINE = { placed: 'dock_line', returns: 'dock_back', refused: 'dock_refused', several: 'dock_several', missing: 'dock_missing', broken: 'dock_broken' };
   function drawDocked() {
-    $('docked').hidden = $('docked-head').hidden = $('docked-foot').hidden = !!S.error;
+    $('docked').hidden = $('docked-foot').hidden = !!S.error;
     const rows = S.docked.map((d, i) => {
       const line = DOCK_LINE[d.state] || 'dock_line';
-      return el('div', { className: 'row dock' }, programKey(d),
+      return el('button', { className: 'row dock', onclick: () => editDocked(i) }, programKey(d),
         el('span', { className: 'lbl' }, el('b', { className: 'ell', textContent: d.name }),
-          el('small', { className: 'ell' + (line === 'dock_line' ? '' : ' problem'), textContent: t(line) })),
-        btn('remove', () => removeDocked(i), 'danger'));
+          el('small', { className: 'ell' + (line === 'dock_line' ? '' : ' warn'), textContent: t(line) })),
+        el('span', { className: 'chev', innerHTML: ICON.chev }));
     });
     $('docked').replaceChildren(...(rows.length ? rows : [say('docked_empty')]));
+  }
+  // A panel's card: where it stands and why, and Remove
+  function editDocked(i) {
+    const d = S.docked[i], line = DOCK_LINE[d.state] || 'dock_line';
+    dialog(d.name, [el('div', { className: 'does' }, programKey(d), el('span', { className: 'lbl' },
+      el('b', { className: line === 'dock_line' ? '' : 'warn', textContent: t(line) }), el('small', { textContent: t(line + '_why') })))],
+      [btn('dock_remove', () => { closeDialog(); removeDocked(i); }, 'danger'), spring(), btn('close', closeDialog)], true);
   }
   function removeDocked(i) {
     const before = dockedRaws(), cards = [...S.docked];
@@ -789,19 +996,21 @@
   $('add-docked').onclick = addDocked;
   $('file-open').onclick = () => invoke('open_settings_file');
 
-  // Order: an item is carried by its dots with a finger, a pen or a mouse; the others make room
+  // Order: an item, or a meter, is carried by its dots with a finger, a pen or a mouse; the others
+  // make room. `drop` is told the place the row left and the place it took
   let carried = null;
-  $('items').addEventListener('pointerdown', e => {
-    const grip = e.target.closest('.grip');
-    if (!grip) return;
-    const row = grip.parentElement, rows = [...$('items').children];
-    carried = { row, id: e.pointerId, y: e.clientY, from: rows.indexOf(row), to: rows.indexOf(row), tops: rows.map(r => r.offsetTop), h: row.offsetHeight };
-    grip.setPointerCapture(e.pointerId);
-    row.classList.add('carried');
-  });
-  $('items').addEventListener('pointermove', e => {
-    if (!carried || e.pointerId !== carried.id) return;
-    const c = carried, rows = [...$('items').children];
+  function reorderable(list, drop) {
+    list.addEventListener('pointerdown', e => {
+      const grip = e.target.closest('.grip');
+      if (!grip) return;
+      const row = grip.parentElement, rows = [...list.children];
+      carried = { list, row, id: e.pointerId, y: e.clientY, from: rows.indexOf(row), to: rows.indexOf(row), tops: rows.map(r => r.offsetTop), h: row.offsetHeight };
+      grip.setPointerCapture(e.pointerId);
+      row.classList.add('carried');
+    });
+    list.addEventListener('pointermove', e => {
+      if (!carried || carried.list !== list || e.pointerId !== carried.id) return;
+      const c = carried, rows = [...list.children];
     const dy = Math.max(-c.tops[c.from], Math.min(c.tops[c.tops.length - 1] - c.tops[c.from], e.clientY - c.y));
     c.row.style.transform = `translateY(${dy}px)`;
     const at = c.tops[c.from] + dy;
@@ -812,20 +1021,44 @@
       r.style.transition = 'transform .12s';
       r.style.transform = shift ? `translateY(${shift}px)` : '';
     });
-  });
-  function dropRow(e) {
-    if (!carried || e.pointerId !== carried.id) return;
-    const { from, to } = carried;
-    carried = null;
+    });
+    const dropRow = e => {
+      if (!carried || carried.list !== list || e.pointerId !== carried.id) return;
+      const { from, to } = carried;
+      carried = null;
+      drop(from, to);
+    };
+    list.addEventListener('pointerup', dropRow);
+    list.addEventListener('pointercancel', dropRow);
+  }
+  reorderable($('items'), (from, to) => {
     if (from === to) return drawItems();
     const items = raws();
     items.splice(to, 0, items.splice(from, 1)[0]);
     S.items.splice(to, 0, S.items.splice(from, 1)[0]);
     drawItems();
     save(items);
-  }
-  $('items').addEventListener('pointerup', dropRow);
-  $('items').addEventListener('pointercancel', dropRow);
+  });
+  // A meter goes the way the capsule moves one (`move_meter`), so the capsule and the values read
+  // follow at once: by places among the meters the panel uses, a broken one not counted and not
+  // carried, and with the meter as drawn, so a file changed meanwhile moves nothing
+  reorderable($('meters'), (from, to) => {
+    if (from === to) return drawMeters();
+    const used = S.meters.map((m, i) => i).filter(i => !S.meters[i].problem);
+    // Its place among the meters the panel uses: as many as stand before it where it was let go
+    const order = S.meters.map((m, i) => i);
+    order.splice(to, 0, order.splice(from, 1)[0]);
+    const fromU = used.indexOf(from), toU = order.slice(0, order.indexOf(from)).filter(i => !S.meters[i].problem).length;
+    if (fromU === toU) return drawMeters();
+    const raw = fields(S.meters[from].raw);
+    // The list takes the move the file takes (`config::with_moved`): out of its place, in at the place
+    // of that used meter, so a broken one in between stays where the file has it
+    const list = [...S.meters], meter = list.splice(used[fromU], 1)[0];
+    list.splice(used[toU], 0, meter);
+    S.meters = list;
+    drawMeters();
+    invoke('move_meter', { from: fromU, to: toU, name: str(raw.name).trim(), target: str(raw.program).trim() || null }).catch(e => { toast(String(e)); refresh(); });
+  });
 
   // ---------- the dialog
   let steps = [];
@@ -1259,6 +1492,7 @@
       S.meters = S.meters || [];
       S.docked = S.docked || [];
       paint(); words(); drawPrefs(); drawMeters(); drawDocked();
+      readStatus();
       if (!carried) drawItems();
       // The welcome window shows its card once, in the language and the theme of the settings
       if (WELCOME && !welcomed) {

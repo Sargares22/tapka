@@ -160,6 +160,17 @@
   .c-sub:empty{display:none}
   .c-hint{font-size:10.5px;line-height:14px;color:var(--ink-dim);opacity:.85;margin-top:4px}
   .c-hint:empty{display:none}
+  /* A meter's label: its name larger, a row per number (name, percent, when it resets), lines of
+     note under them, and a problem in the warning colour under a thin line */
+  #card.gauge .c-title{font-size:15px;font-weight:500}
+  .c-rows{display:grid;grid-template-columns:auto auto auto;column-gap:10px;align-items:baseline;margin-top:3px}
+  .c-rows.bare{grid-template-columns:auto auto}
+  .c-rows:empty{display:none}
+  .c-rows>div{font-size:11px;color:var(--ink-dim);white-space:nowrap}
+  .c-rows>.c-pct{font-size:15px;font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums;text-align:right}
+  .c-rows.stale>.c-pct{color:var(--ink-dim)}
+  .c-problem{font-size:11px;color:var(--warn);margin-top:7px;padding-top:6px;border-top:.5px solid var(--track)}
+  .c-problem:empty{display:none}
   /* At the left edge the strip and the label change sides; nothing else is mirrored */
   body[data-edge="left"] #pill{right:auto;left:0;border-radius:0 22px 22px 0}
   body[data-edge="left"] #card{right:auto;left:70px}
@@ -202,7 +213,7 @@
 </style>
 </head>
 <body>
-  <div id="card" hidden><div class="c-title"></div><div class="c-sub"></div><div class="c-hint"></div></div>
+  <div id="card" hidden><div class="c-title"></div><div class="c-sub"></div><div class="c-rows"></div><div class="c-hint"></div><div class="c-problem"></div></div>
   <div id="pill"><div id="grip"></div><div id="keys"><div id="list"></div></div></div>
 <script>
   // The browser's own menu (Back, Refresh, Print) and its reload and print keys are no part of the
@@ -237,6 +248,8 @@
   let length = null, reach = [], room = null;
   // What the label of a meter with nothing found says in place of its percent
   let noData = '—';
+  // Under the name of a meter of an AI limit: its percents are what is used
+  let usedWord = '';
   // The keys without a meter whose program shows progress on its taskbar button: the percent, by
   // the item's place in the settings file; and the age of the list of items those places are of
   let rims = new Map(), age = null;
@@ -500,6 +513,7 @@
     reach = view.reach || [];
     room = view.room || null;
     noData = view.no_data || '—';
+    usedWord = view.used || '';
     shown = [...view.items, { name: view.add[0], hint: view.add[1], glyph: PLUS, add: true, sign: 'plus' },
       { ...view.gear, add: true, sign: 'gear' }, { ...view.fold, add: true, sign: 'fold' }];
     const fresh = setChange ? view.items.filter(it => !before.includes(it.at)).map(it => it.at) : [];
@@ -627,21 +641,31 @@
   let failing = false;
   function showCard(b) {
     if (b.classList.contains('meter')) {
-      // What it says about time comes before the hint: when it resets, how long ago it was updated
+      // A row for the percent and one for the outer ring, each with its name and when it resets;
+      // how old a stale reading is and the file's own lines under them; the problem last
       const m = meters[Number(b.dataset.m)];
       cardAt = scrolled(gauges);
-      return openCard(b, m.name, m.value == null ? noData : percent(m.value), [...(m.notes || []), ...(m.hint || [])]);
+      const row = (at, v) => [(m.rows || [])[at] || '', v + '\u00a0%', (m.when || [])[at] || ''];
+      const rows = m.value == null ? [] : [row(0, m.value), ...(m.outer == null ? [] : [row(1, m.outer)])];
+      return openCard(b, m.name, m.value == null ? noData : m.limit ? usedWord : '', [...(m.ago ? [m.ago] : []), ...(m.hint || [])], { rows, stale: m.stale, problem: m.problem });
     }
     const it = shown[Number(b.dataset.i)];
     openCard(b, it.name, it.lost ? lostWords : it.hint);
   }
   // The same label, level with `anchor`: an item, or the whole list for a note about the keys.
   // A folded capsule shows no label of any kind.
-  function openCard(anchor, title, sub, hint) {
+  function openCard(anchor, title, sub, hint, gauge = null) {
     failing = false;
     if (folded) return;
+    card.classList.toggle('gauge', !!gauge);
     card.querySelector('.c-title').textContent = title;
     card.querySelector('.c-sub').textContent = sub || '';
+    // Rows without names, a file's or a program's, leave out the first column
+    const rows = gauge ? gauge.rows : [], named = rows.some(r => r[0]), box = card.querySelector('.c-rows');
+    const cell = (name, text) => Object.assign(document.createElement('div'), { className: name, textContent: text });
+    box.className = 'c-rows' + (named ? '' : ' bare') + (gauge && gauge.stale ? ' stale' : '');
+    box.replaceChildren(...rows.flatMap(([name, pct, when]) => [...(named ? [cell('c-row', name)] : []), cell('c-pct', pct), cell('c-when', when)]));
+    card.querySelector('.c-problem').textContent = (gauge && gauge.problem) || '';
     // A file's hint, a line each
     card.querySelector('.c-hint').replaceChildren(...(hint || []).map(line => Object.assign(document.createElement('div'), { textContent: line })));
     cardFor = anchor;
@@ -1028,6 +1052,11 @@
       click();
       // The meter goes with its name and program: Rust opens nothing if its place holds another
       invoke('open_meter', { index: Number(p.b.dataset.m), name: m.name, target: m.target });
+    } else if (still && !p.long && m && m.limit && m.sign_in) {
+      // An AI limit whose sign-in is what is wrong: its program's own sign-in opens in a window
+      click();
+      // One already open is not opened twice; the label says so
+      invoke('limit_sign_in', { service: m.limit }).then(open => { if (open) openCard(p.b, m.name, open); }).catch(why => openCard(p.b, m.name, String(why)));
     }
     afterPress();
   });
@@ -1046,7 +1075,9 @@
   // `latest` is the newest event, by the count of changes Rust keeps (`readings`), which a drawing
   // copied earlier must not undo
   let latest = null;
-  const takeValues = values => values.forEach((r, i) => { if (meters[i]) Object.assign(meters[i], { value: r ? r.value : null, outer: r ? r.outer : null, hint: r ? r.hint : [], stale: !!(r && r.stale), notes: (r && r.notes) || [] }); });
+  const takeValues = values => values.forEach((r, i) => {
+    if (meters[i]) Object.assign(meters[i], { value: null, outer: null, hint: [], rows: [], when: [], ago: null, problem: null, stale: false, sign_in: false }, r || {});
+  });
   window.__TAURI__.event.listen('meters', e => {
     const p = e.payload;
     if (latest && p.readings != null && p.readings <= latest.readings) return;

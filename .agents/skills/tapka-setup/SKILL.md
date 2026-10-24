@@ -40,9 +40,12 @@ order (`references/meters.md`):
 1. **Key** — an `open` item for the program. Always possible.
 2. **Meter from the program** — only if the program shows progress to Windows (a bar on its
    taskbar button, a progress bar in its window, or a percent at the start of its title).
-3. **Meter from a file** — the program keeps the number on the disk or can be asked for it: write
+3. **AI usage meter** — for Claude Code, Codex (ChatGPT) and Antigravity Tapka reads the usage
+   limits itself: add a `limit` meter, no recipe. If its status says it is not connected, the
+   person presses *Connect* in Settings → Indicators.
+4. **Meter from a file** — the program keeps the number on the disk or can be asked for it: write
    a recipe script into the person's own folder, start it at sign-in, add a `file` meter.
-4. **Docking** — last resort, only for a panel window at the screen edge that has no number to
+5. **Docking** — last resort, only for a panel window at the screen edge that has no number to
    read, and only after the person says yes to it by name.
 
 Then the same one question, apply, verify, summary.
@@ -55,7 +58,8 @@ One message: what you found and what you will do, as a short list, ending in one
 Found and suggest:
 - Keys: Krita, Handy (dictation, ctrl+space, glows while recording)
 - Meters: Blender (shows render progress on its taskbar button)
-- Meter from a file: usage limits another program keeps in its files — I write a script into Documents\Tapka recipes, it starts at sign-in
+- AI usage: Claude and ChatGPT (built into Tapka, no script)
+- Meter from a file: a backup tool's progress it keeps in a log — I write a script into Documents\Tapka recipes, it starts at sign-in
 Do all of it?
 ```
 

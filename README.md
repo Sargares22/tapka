@@ -94,11 +94,11 @@ Everything lives in `%APPDATA%\sargares22.tapka\settings.json`; the settings win
 - `only_in`: a program's file name or Store package family, like `"only_in": "mspaint.exe"`. The key is on the capsule only while that program's window is active, right after the first two keys for all programs. The editor sets it too: *Where to show*.
 - `length`: how many keys long the capsule may be, at least 2; dragging the bar at its end after a tap on *+* sets it. The capsule is never longer than its keys and meters need, so it shows no empty cells. Without it the capsule is as long as its keys, up to four, and all its meters.
 - `top` (0 to 1) places the capsule along its edge; `tablet_only: true` hides it while a keyboard is attached. The exact `top` and the `lit` rule are file-only. `tour_done: true` is written by Tapka once the first-start window with your programs has closed.
-- A broken item is skipped, and the tray tooltip says what is wrong.
+- A broken key is skipped, and the tray tooltip says what is wrong.
 
 ### Meters
 
-*Add a meter* under Meters in the settings window puts a small gauge under the keys: a rounded square like a key, whose outline fills from the middle of its top. It shows the progress of a program you pick from the installed ones (what it shows on its taskbar button, a progress bar in its windows, or a percent at the start of its title), or the numbers in a text file that any script or program can write, in UTF-8 or UTF-16.
+*Add an indicator* under Indicators in the settings window puts a small gauge under the keys: a rounded square like a key, whose outline fills from the middle of its top. It shows the progress of a program you pick from the installed ones (what it shows on its taskbar button, a progress bar in its windows, or a percent at the start of its title), or the numbers in a text file that any script or program can write, in UTF-8 or UTF-16.
 
 A key of a program needs no meter for its own progress: while the program shows progress on its taskbar button, a copy in File Explorer for one, the key's edge fills, and it clears when the progress ends.
 
@@ -116,7 +116,7 @@ A few lines of the file are for Tapka itself and do not show as text. Times are 
 |---|---|
 | `updated: <time>` | When your script last got the numbers. Without it, the time the file was last written |
 | `fresh: <minutes>` | How old the numbers may be, 5 minutes if not given. Older, the gauge turns grey, keeps its last percent, and its label adds *updated 12 min ago* |
-| `reset: <time>` | When the gauge's number resets. The label counts down, *resets in 2 h 33 min*, or gives the day, *resets Mon 26 Oct, 11:00*, when it is more than a day away; once the time has passed, *due, waiting for an update*, and the percent stays until your file changes |
+| `reset: <time>` | When the gauge's number resets. The label counts down, *resets in 2 h 33 min*, or gives the day, *resets Mon, 11:00*, when it is more than a day away, and the date too, *resets Mon 2 Nov, 11:00*, past six days; once the time has passed, *reset*, and the percent stays until your file changes |
 | `reset2: <time>` | The same for the second outline |
 
 The Russian keys `обновлено:`, `свежесть:`, `сброс:` and `сброс2:` work too. A file that is missing or has no number on its first line shows a grey gauge with *—*, and its label says *no data*; it never shows 0 %.
@@ -136,14 +136,19 @@ Where a meter gets its number:
 
 | Way | What fits | What to do |
 |---|---|---|
-| Works by itself | Copying in File Explorer and other programs that show progress on their taskbar button | *Add a meter* → *Program* → pick it |
+| Works by itself | Copying in File Explorer and other programs that show progress on their taskbar button | *Add an indicator* → *Program* → pick it |
 | Works where the program shows its progress to Windows | Renders, downloads, installers: a progress bar in a window, or a percent at the start of the title | The same. An empty grey meter means the program does not show its progress |
-| Needs your script | Limits, battery, free space, any number of your own | A script writes the number to a text file; a *File* meter reads it |
+| Built in | The usage limits of Claude Code, Codex (ChatGPT) and Antigravity signed in on this computer | *Add an indicator* → *AI usage* → pick the service |
+| Needs your script | Battery, free space, any number of your own | A script writes the number to a text file; a *File* meter reads it |
+
+An *AI usage* meter fills with the share of the 5-hour limit used and its thin outline with the week's; its label counts down to both resets and says why the numbers are old when a read fails. In the settings file it is `{ "name": "Claude", "limit": "claude" }`, with `limit` instead of `program` or `file`:
+
+- `limit`: `claude` (the Claude Code sign-in), `chatgpt` (the Codex sign-in), `antigravity-gemini` or `antigravity-claude` (Antigravity's Gemini models, or its Claude and GPT models). Tapka asks for the limits every 5 minutes, and only while such a meter exists. Without a sign-in the meter is grey and says *no data*, never 0 %. To connect, tap the meter, or press *Connect* in its card under Indicators in the settings window: the program's own sign-in opens in a window, and the meter comes alive within seconds of it. Nothing to type.
 
 #### Your own source in 10 minutes
 
 1. Write a script that puts the number on the first line of a text file. Hint lines go below it.
-2. In Tapka: *Add a meter* → *File*, and pick that file.
+2. In Tapka: *Add an indicator* → *File*, and pick that file.
 3. Start the script when you sign in: a shortcut in the Startup folder (`shell:startup`).
 
 ```powershell
@@ -155,11 +160,11 @@ while ($true) {
 }
 ```
 
-Scripts for other programs live apart from Tapka: Tapka has no code for any of them. An AI agent writes such a script for you (see [Install with an AI agent](#install-with-an-ai-agent)).
+Apart from the AI limits, scripts for other programs live apart from Tapka: Tapka has no code for any of them. An AI agent writes such a script for you (see [Install with an AI agent](#install-with-an-ai-agent)).
 
 ## Recipes
 
-Tapka is not tied to any other program. Here is what people connect:
+Apart from the AI limit meters, Tapka is not tied to any other program. Here is what people connect:
 
 - **Dictation (Handy and the like).** Add a *Keyboard shortcut* key with the shortcut it listens to, say `ctrl+space`. To make the key glow while recording, give the item a `lit` rule: the program and the title of its recording window.
 
@@ -186,7 +191,8 @@ What the panel does:
 
 - sends key presses to the active window when you tap a key that carries a shortcut or holds a key;
 - reads the list of windows and their titles twice a second, to mark the programs that are running;
-- with update checks on, contacts GitHub once per start.
+- with update checks on, contacts GitHub once per start;
+- with an *AI usage* meter, every 5 minutes reads the Claude Code or Codex sign-in on this computer and asks Anthropic or OpenAI for its limits, or runs Antigravity's `agy` command without a window; the sign-in goes nowhere else and never into the log.
 
 What it does not do: it does not record what you type, does not send window titles anywhere, and collects no statistics. The log stays on your computer and is limited in size.
 

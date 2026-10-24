@@ -27,7 +27,7 @@ function renderedDom(items, script = '', ms = 4000, page = 'index.html', setting
   assert.ok(browser, 'Google Chrome not found');
   const work = mkdtempSync(join(tmpdir(), 'tapka-check-'));
   try {
-    const stub = `<script>window.__calls=[];window.__on={};window.__view={items:${JSON.stringify(items)},cell:54,tablet:false,edge:'right',theme:'dark',accent:'#8ab4ff',add:['Добавить','Настройки и сворачивание капсулы'],gear:{name:'Настройки',hint:'Открыть окно настроек',glyph:'<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M4 4h16"/></svg>'},fold:{name:'Свернуть',hint:'Свернуть капсулу в одну клавишу',glyph:'<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M4 12h16"/></svg>'},unfold:'<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M20 12H4"/></svg>'};window.__settings=${JSON.stringify(settings)};window.__programs=[{name:'Paint Studio',exe:'paint.exe'},{name:'Sketch',exe:'sketch.exe'}];window.__TAURI__={core:{invoke:async(c,a)=>{window.__calls.push([c,a]);if((c==='save_docked'||c==='save_meters')&&window.__saveFails)throw 'the file is locked';if(c==='save_items'&&window.__itemsFail)throw 'the file is locked';if(c==='save_items'&&window.__itemsHold)await window.__itemsHold;return c==='get_view'?window.__view:c==='get_settings'?JSON.parse(JSON.stringify(window.__settings)):c==='running_programs'?window.__programs:c==='pinned_apps'?window.__pinned:c==='bundle_items'?window.__bundle?.(a):c==='open_key_set'?window.__keySet():c==='key_set_items'?window.__keySetItems(a):c==='save_key_set'?3:c==='dock_candidates'?window.__candidates:c==='first_programs'?window.__found:null}},event:{listen(n,cb){window.__on[n]=cb}}}</script>`;
+    const stub = `<script>window.__calls=[];window.__on={};window.__view={items:${JSON.stringify(items)},cell:54,tablet:false,edge:'right',theme:'dark',accent:'#8ab4ff',add:['Добавить','Настройки и сворачивание капсулы'],gear:{name:'Настройки',hint:'Открыть окно настроек',glyph:'<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M4 4h16"/></svg>'},fold:{name:'Свернуть',hint:'Свернуть капсулу в одну клавишу',glyph:'<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M4 12h16"/></svg>'},unfold:'<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M20 12H4"/></svg>'};window.__settings=${JSON.stringify(settings)};window.__programs=[{name:'Paint Studio',exe:'paint.exe'},{name:'Sketch',exe:'sketch.exe'}];window.__TAURI__={core:{invoke:async(c,a)=>{window.__calls.push([c,a]);if((c==='save_docked'||c==='save_meters')&&window.__saveFails)throw 'the file is locked';if(c==='save_items'&&window.__itemsFail)throw 'the file is locked';if(c==='save_items'&&window.__itemsHold)await window.__itemsHold;return c==='get_view'?window.__view:c==='get_settings'?JSON.parse(JSON.stringify(window.__settings)):c==='running_programs'?window.__programs:c==='pinned_apps'?window.__pinned:c==='bundle_items'?window.__bundle?.(a):c==='open_key_set'?window.__keySet():c==='key_set_items'?window.__keySetItems(a):c==='save_key_set'?3:c==='dock_candidates'?window.__candidates:c==='first_programs'?window.__found:c==='limit_status'?(window.__limitStatus||null):c==='limit_sign_in'?(window.__signInOpen||null):null}},event:{listen(n,cb){window.__on[n]=cb}}}</script>`;
     const html = readFileSync(join(root, 'ui', page), 'utf8')
       .replace('<head>', '<head>' + stub + `<script>${before}</script>`)
       .replace('</body>', `<script>${script}</script></body>`);
@@ -913,7 +913,15 @@ const metered = [
 const meterScript = `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const q = s => document.querySelector(s);
-  const card = () => { const c = q('#card'); return c.hidden ? null : [c.querySelector('.c-title').textContent, c.querySelector('.c-sub').textContent]; };
+  // A meter's label: its name, and "no data" or the percent of its first row
+  const card = () => {
+    const c = q('#card'), pct = c.querySelector('.c-rows .c-pct');
+    return c.hidden ? null : [c.querySelector('.c-title').textContent, c.querySelector('.c-sub').textContent || (pct ? pct.textContent.replace('\\u00a0', '') : '')];
+  };
+  // Its rows, cell by cell, its plain lines, and its problem
+  const rowsOf = () => [...q('#card .c-rows').children].map(d => d.textContent.replace('\\u00a0', ' '));
+  const notesOf = () => [...q('#card .c-hint').children].map(d => d.textContent);
+  const problemOf = () => [q('#card .c-problem').textContent, getComputedStyle(q('#card .c-problem')).display];
   const fire = (el, type) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 2, pointerType: 'touch', clientX: 10, clientY: 10 }));
   // What Rust sends for a meter: a percent, and from a file an outer ring and lines of hint
   const rd = (value, outer = null, hint = []) => value == null ? null : { value, outer, hint };
@@ -1109,36 +1117,76 @@ const meterScript = `(async () => {
   // long ago and when it resets; a file with nothing in it is grey with no percent and says so
   window.__view = { ...window.__view, divider: null }; window.__on.reload(); await sleep(50);
   const gs = () => [...document.querySelectorAll('.meter')];
-  window.__on.meters({ payload: { generation: 1, values: [{ value: 64, outer: 20, hint: ['CPU'], stale: true, notes: ['сброс через 2 ч 33 мин', 'обновлено 12 мин назад'] }, null] } });
+  const file = (when, ago) => ({ value: 64, outer: 20, hint: ['CPU'], stale: true, when, ago });
+  window.__on.meters({ payload: { generation: 1, values: [file(['сброс через 2 ч 33 мин', 'сброс пн, 10:59'], 'обновлено 12 мин назад'), null] } });
   const look = m => [m.classList.contains('stale'), m.classList.contains('none'), m.querySelector('.pct').textContent, getComputedStyle(m.querySelector('.dial .arc')).stroke];
   out.staleLook = gs().map(look);
   out.freshStroke = (() => { const m = gs()[0]; m.classList.remove('stale'); const s = getComputedStyle(m.querySelector('.dial .arc')).stroke; m.classList.add('stale'); return s; })();
-  const lines = () => [...q('#card .c-hint').children].map(d => d.textContent);
   fire(gs()[0], 'pointerdown'); await sleep(450);
-  out.staleLabel = [card(), lines()];
+  // A file of two numbers: two rows without names, the percents grey while stale, how old it is
+  // and the file's own line under them, no problem
+  const pctColour = () => getComputedStyle(q('#card .c-pct')).color, ink = getComputedStyle(q('#card .c-title')).color;
+  out.staleLabel = [card(), rowsOf(), notesOf(), problemOf(), q('#card .c-rows').classList.contains('bare'), pctColour() !== ink];
   // The clock moves on with the file as it was: Rust sends the new words and the open label shows them
-  window.__on.meters({ payload: { generation: 1, values: [{ value: 64, outer: 20, hint: ['CPU'], stale: true, notes: ['сброс через 2 ч 32 мин', 'обновлено 13 мин назад'] }, null] } });
-  out.staleLater = lines();
+  window.__on.meters({ payload: { generation: 1, values: [file(['сброс через 2 ч 32 мин', ''], 'обновлено 13 мин назад'), null] } });
+  out.staleLater = [rowsOf(), notesOf()];
   fire(gs()[0], 'pointerup');
   fire(gs()[1], 'pointerdown'); await sleep(450);
-  out.noData = [card(), lines()];
+  out.noData = [card(), notesOf(), rowsOf(), problemOf()];
   fire(gs()[1], 'pointerup');
+  // An AI limit read: a row each for the five hours and the week, named, with when each resets;
+  // its problem last, in the warning colour; fresh, so its percents in the plain colour
+  const limit = { value: 74, outer: 100, rows: ['5 часов', 'Неделя'], when: ['сброс через 2 ч 10 мин', 'сброс пн, 10:59'], problem: 'Нажмите, чтобы подключить', stale: false, hint: [] };
+  window.__on.meters({ payload: { generation: 1, values: [limit, null] } });
+  fire(gs()[0], 'pointerdown'); await sleep(450);
+  const warn = getComputedStyle(document.documentElement).getPropertyValue('--warn').trim();
+  out.limitLabel = [card(), rowsOf(), notesOf(), problemOf(), q('#card .c-rows').classList.contains('bare'), pctColour() === ink,
+    getComputedStyle(q('#card .c-problem')).color === getComputedStyle(Object.assign(document.body.appendChild(document.createElement('i')), { style: 'color:' + warn })).color,
+    q('#card').getBoundingClientRect().width <= 260];
+  fire(gs()[0], 'pointerup');
+  // An AI limit never read: no percent, grey, and its label says why under "no data"
+  window.__on.meters({ payload: { generation: 1, values: [file([], null), { value: null, outer: null, hint: [], problem: 'Нажмите, чтобы подключить', stale: false }] } });
+  fire(gs()[1], 'pointerdown'); await sleep(450);
+  out.noDataWhy = [look(gs()[1]).slice(0, 3), card(), rowsOf(), notesOf(), problemOf()];
+  fire(gs()[1], 'pointerup');
+  // A tap on an AI limit whose sign-in is what is wrong starts that service's sign-in; a tap on one
+  // that failed otherwise starts nothing
+  const plain = window.__view.meters;
+  window.__view = { ...window.__view, meters: [plain[0], { ...plain[1], limit: 'claude' }] }; window.__on.reload(); await sleep(50);
+  const signIns = () => window.__calls.filter(c => c[0] === 'limit_sign_in').map(c => c[1].service);
+  window.__on.meters({ payload: { generation: 1, values: [file([], null), { value: null, problem: 'Нажмите, чтобы подключить', sign_in: true }] } });
+  fire(gs()[1], 'pointerdown'); fire(gs()[1], 'pointerup'); await sleep(50);
+  out.tapSignIn = signIns();
+  window.__signInOpen = 'Вход уже открыт';
+  fire(gs()[1], 'pointerdown'); fire(gs()[1], 'pointerup'); await sleep(50);
+  out.tapOpen = card();
+  window.__signInOpen = null;
+  window.__on.meters({ payload: { generation: 1, values: [file([], null), { value: null, problem: 'Не удалось узнать лимит', sign_in: false }] } });
+  fire(gs()[1], 'pointerdown'); fire(gs()[1], 'pointerup'); await sleep(50);
+  out.tapNoSignIn = signIns();
+  // Read, an AI limit's label says under its name that its percents are what is used
+  window.__view = { ...window.__view, used: 'израсходовано' }; window.__on.reload(); await sleep(50);
+  window.__on.meters({ payload: { generation: 1, values: [file([], null), { value: 74, outer: 6, rows: ['5 часов', 'Неделя'], when: ['', ''], hint: [] }] } });
+  fire(gs()[1], 'pointerdown'); await sleep(450);
+  out.usedLine = [q('#card .c-sub').textContent, rowsOf()];
+  fire(gs()[1], 'pointerup');
+  window.__view = { ...window.__view, meters: plain, used: undefined }; window.__on.reload(); await sleep(50);
   // Updated again: as before
-  window.__on.meters({ payload: { generation: 1, values: [{ value: 65, outer: null, hint: [], stale: false, notes: [] }, null] } });
+  window.__on.meters({ payload: { generation: 1, values: [{ value: 65, outer: null, hint: [], stale: false }, null] } });
   out.freshAgain = look(gs()[0]);
   // A view copied before a newer event comes after it: the event's values stay; a newer view and
   // a newer event count, an older event does not
   const pct = () => gs()[0].querySelector('.pct').textContent;
-  window.__on.meters({ payload: { generation: 1, readings: 5, values: [{ value: 70, outer: null, hint: [], stale: false, notes: [] }, null] } });
+  window.__on.meters({ payload: { generation: 1, readings: 5, values: [{ value: 70, outer: null, hint: [], stale: false }, null] } });
   window.__view = { ...window.__view, readings: 3, meters: [{ ...window.__view.meters[0], value: 42, stale: true }, window.__view.meters[1]] };
   window.__on.reload(); await sleep(50);
   out.lateView = [pct(), gs()[0].classList.contains('stale')];
-  window.__on.meters({ payload: { generation: 1, readings: 4, values: [{ value: 10, outer: null, hint: [], stale: false, notes: [] }, null] } });
+  window.__on.meters({ payload: { generation: 1, readings: 4, values: [{ value: 10, outer: null, hint: [], stale: false }, null] } });
   out.oldEvent = pct();
   window.__view = { ...window.__view, readings: 6, meters: [{ ...window.__view.meters[0], value: 81, stale: false }, window.__view.meters[1]] };
   window.__on.reload(); await sleep(50);
   out.newView = pct();
-  window.__on.meters({ payload: { generation: 1, readings: 7, values: [{ value: 82, outer: null, hint: [], stale: false, notes: [] }, null] } });
+  window.__on.meters({ payload: { generation: 1, readings: 7, values: [{ value: 82, outer: null, hint: [], stale: false }, null] } });
   out.newEvent = pct();
   window.__on.reload(); await sleep(50);
   // The pill keeps its length, so a press of the divider asks Rust for nothing and a release
@@ -1165,7 +1213,7 @@ const meterScript = `(async () => {
   out.gone = [!!q('#divider'), !!q('#meters'), document.querySelectorAll('.ring').length, q('#list').style.flex];
   document.documentElement.dataset.check = JSON.stringify(out);
 })();`;
-const mt = found(renderedDom(items, meterScript, 6000));
+const mt = found(renderedDom(items, meterScript, 8000));
 
 // Every count from one key to ten and from one meter to ten, in rooms of three, seven and as many
 // cells as all of them need, cut as layout.rs cuts them (`room`): wherever the line is pulled, the
@@ -1276,9 +1324,16 @@ test('a stale meter is grey with its last percent and says how old it is; one wi
   assert.deepEqual(mt.staleLook[0], [true, false, '64%', grey]);
   assert.notEqual(mt.freshStroke, grey);
   assert.deepEqual(mt.staleLook[1].slice(0, 3), [false, true, '—']);
-  assert.deepEqual(mt.staleLabel, [['Render', '64%'], ['сброс через 2 ч 33 мин', 'обновлено 12 мин назад', 'CPU']]);
-  assert.deepEqual(mt.staleLater, ['сброс через 2 ч 32 мин', 'обновлено 13 мин назад', 'CPU']);
-  assert.deepEqual(mt.noData, [['backup', 'нет данных'], []]);
+  assert.deepEqual(mt.staleLabel, [['Render', '64%'], ['64 %', 'сброс через 2 ч 33 мин', '20 %', 'сброс пн, 10:59'], ['обновлено 12 мин назад', 'CPU'], ['', 'none'], true, true]);
+  assert.deepEqual(mt.staleLater, [['64 %', 'сброс через 2 ч 32 мин', '20 %', ''], ['обновлено 13 мин назад', 'CPU']]);
+  assert.deepEqual(mt.noData, [['backup', 'нет данных'], [], [], ['', 'none']]);
+  assert.deepEqual(mt.limitLabel, [['Render', '74%'], ['5 часов', '74 %', 'сброс через 2 ч 10 мин', 'Неделя', '100 %', 'сброс пн, 10:59'], [],
+    ['Нажмите, чтобы подключить', 'block'], false, true, true, true]);
+  assert.deepEqual(mt.noDataWhy, [[false, true, '—'], ['backup', 'нет данных'], [], [], ['Нажмите, чтобы подключить', 'block']]);
+  assert.deepEqual(mt.tapSignIn, ['claude']);
+  assert.deepEqual(mt.tapOpen, ['backup', 'Вход уже открыт']);
+  assert.deepEqual(mt.tapNoSignIn, ['claude', 'claude']);
+  assert.deepEqual(mt.usedLine, ['израсходовано', ['5 часов', '74 %', '', 'Неделя', '6 %', '']]);
   assert.deepEqual(mt.freshAgain.slice(0, 3), [false, false, '65%']);
   assert.equal(mt.freshAgain[3], mt.freshStroke);
 });
@@ -2206,7 +2261,7 @@ test('story 45: the welcome window is one screen: my programs, Add and Not now',
 
 test('the settings window lists the items of the file in words, broken ones included', () => {
   assert.deepEqual(set.rows, ['Снимок', 'Диктовка', 'Заметки', 'Потом']);
-  assert.deepEqual(set.lines, ['Выделить область', 'Сочетание Ctrl+Space', 'Программа', 'Пункт не работает: коснитесь, чтобы исправить']);
+  assert.deepEqual(set.lines, ['Выделить область', 'Сочетание Ctrl+Space', 'Программа', 'Клавиша не работает: коснитесь, чтобы исправить']);
   assert.deepEqual(set.keys, [[true, ''], [true, ''], [true, ''], [true, '']]);
   // The card of programs opens only from its quiet line
   assert.deepEqual(set.find, ['Найти мои программы', false, false]);
@@ -2218,7 +2273,7 @@ test('an item without a hint is told by its kind, never by its path, address or 
   for (const line of set.kindLines) assert.doesNotMatch(line, /\\|:\/\/|\.exe|ms-settings:/i);
   // Without a picture of its own an item shows a drawing of its kind, not a letter
   assert.ok(set.kindKeys.every(Boolean));
-  assert.deepEqual(set.linesEn, ['Выделить область', 'Shortcut Ctrl+Space', 'Program', 'This item does not work: tap to fix it']);
+  assert.deepEqual(set.linesEn, ['Выделить область', 'Shortcut Ctrl+Space', 'Program', 'This key does not work: tap to fix it']);
 });
 
 test('theme, accent, size, edge and autostart apply at once and go to Rust one by one', () => {
@@ -2317,7 +2372,7 @@ test('a tap on an item opens its card, which fits the window with its path folde
   assert.equal(set.glyphsFolded, true);
   assert.deepEqual(set.ownButton, ['34px', '16px']);
   assert.equal(set.glyphCount, 6);
-  assert.deepEqual(set.brokenCard, ['Пункт не работает', 'unknown action "script"']);
+  assert.deepEqual(set.brokenCard, ['Клавиша не работает', 'unknown action "script"']);
 });
 
 test('an item is edited, removed, restored and moved; fields the window does not show are kept', () => {
@@ -2354,39 +2409,163 @@ test('story 26: the card shows and sets the program an item is for, keeping the 
 });
 
 test('the settings window speaks Russian and English', () => {
-  assert.deepEqual(set.navRu, ['Пункты', 'Вид', 'Общие', 'О программе']);
-  assert.deepEqual(set.navEn, ['Items', 'Look', 'General', 'About']);
+  assert.deepEqual(set.navRu, ['Клавиши', 'Индикаторы', 'Соседние панели', 'Вид', 'Общие', 'О программе']);
+  assert.deepEqual(set.navEn, ['Keys', 'Indicators', 'Nearby panels', 'Look', 'General', 'About']);
   assert.equal(set.addEn, 'Add');
 });
 
-// The meters in the settings window: added from the program list or a file, removed and
-// restored; what the window does not show of a meter stays in it
+// The indicators in the settings window, a page of their own: rows as the keys' with the dots, the
+// arrow and no button; the card renames, changes the source in place, connects and removes; added
+// from the program list, an AI service or a file; what the window does not show of a meter stays
 const withMeters = { ...settings, meters: [{ raw: { name: 'Render', program: 'C:\\Tools\\render.exe', own: 1 }, icon: PNG, problem: null },
-  { raw: { name: 'Backup', file: 'D:\\data\\backup.txt' }, icon: null, problem: null }, { raw: { name: 'Both', program: 'a.exe', file: 'b.txt' }, icon: null, problem: 'both a program and a file' }] };
+  { raw: { name: 'Backup', file: 'D:\\data\\backup.txt' }, icon: null, problem: null }, { raw: { name: 'Both', program: 'a.exe', file: 'b.txt' }, icon: null, problem: 'more than one of a program, a file and a limit' },
+  { raw: { name: 'Claude', limit: 'claude' }, icon: null, problem: null }] };
 const meterSettings = `(async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const $ = id => document.getElementById(id);
   const saved = () => window.__calls.filter(c => c[0] === 'save_meters').map(c => c[1].meters).pop();
+  const calls = name => window.__calls.filter(c => c[0] === name).map(c => c[1].service);
   const texts = sel => [...document.querySelectorAll(sel)].map(e => e.textContent);
+  const rows = () => [...document.querySelectorAll('#meters .row')];
+  const status = s => { window.__limitStatus = { claude: { state: 'sign_in' }, chatgpt: { state: 'ok' }, 'antigravity-gemini': { state: 'missing' }, 'antigravity-claude': { state: 'unknown' }, ...s }; };
   window.__pinned = [{ name: 'Paint Studio', target: 'C:\\\\Apps\\\\paint.exe', app: 'Vendor.Paint' }];
   window.__TAURI__.dialog = { open: async () => 'D:\\\\data\\\\Report.final.txt' };
-  await sleep(50);
+  // Claude has a meter and was never read: it is being checked
+  status({ claude: { state: 'checking' } });
+  window.__on.reload(); await sleep(50);
   const out = {};
+  // The menu: a page for each list, each showing its own
+  const nav = s => document.querySelector('.nav[data-s="' + s + '"]').click();
+  const shows = () => [document.querySelector('section.on').id, ...['items', 'meters', 'docked'].map(id => $(id).getClientRects().length > 0)];
+  out.navs = texts('.nav span');
+  nav('meters'); out.pages = [shows()]; nav('docked'); out.pages.push(shows()); nav('items'); out.pages.push(shows()); nav('meters');
   out.head = $('meters-head').textContent;
+  out.primary = document.querySelectorAll('#s-meters .btn.acc').length;
   out.rows = texts('#meters .row .lbl b');
   out.lines = texts('#meters .row .lbl small');
+  out.spinner = !!document.querySelector('#meters .state.checking .spin');
+  out.inline = [document.querySelectorAll('#meters .row .btn').length, document.querySelectorAll('#meters .row .chev').length];
+  // The check ends: Claude is not connected, said in the warning colour, with a dot only when connected
+  status({});
+  await sleep(2300);
+  out.resolved = [texts('#meters .row .lbl small').pop(), !!document.querySelector('#meters .state.sign_in'), !document.querySelector('#meters .state .dot')];
+  // Order: the Claude meter carried by its dots to the top goes the capsule's way, by places among
+  // the meters the panel uses (the broken one has no dots and is not counted), with its name and
+  // no program; the list shows the new order at once
+  out.grips = rows().map(r => !!r.querySelector('.grip'));
+  const grip = rows()[3].querySelector('.grip'), h = rows()[0].offsetHeight;
+  grip.setPointerCapture = () => {};
+  const at = (type, y) => grip.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 8, pointerType: 'touch', clientX: 20, clientY: y }));
+  at('pointerdown', 400); at('pointermove', 400 - 3 * h); at('pointerup', 400 - 3 * h);
+  out.meterMoved = [window.__calls.filter(c => c[0] === 'move_meter').map(c => c[1]), texts('#meters .row .lbl b')];
+  window.__on.reload(); await sleep(20);
   out.icon = !!document.querySelector('#meters .row .key img');
+  // The card: its name, its source with Change, Remove in red at the bottom; a rename writes the
+  // name onto the meter and keeps its other fields
+  rows()[0].click(); await sleep(20);
+  out.card = [$('title').textContent, document.querySelector('#body .namebox input').value, texts('#body .does .lbl b'), texts('#body .does .lbl small'), texts('#body .does .btn'), texts('#foot .btn'), !!document.querySelector('#foot .btn.danger')];
+  document.querySelector('#body .namebox input').value = 'Рендер';
+  [...document.querySelectorAll('#foot .btn')].pop().click(); await sleep(50);
+  out.renamed = saved();
+  window.__on.reload(); await sleep(20);
+  // Change: the add choices again; the new source takes the old one's place, with its name
+  rows()[1].click(); await sleep(20);
+  document.querySelector('#body .does .btn').click(); await sleep(20);
+  out.changeTitle = [$('title').textContent, texts('#body .row .lbl b')];
+  document.querySelectorAll('#body .row')[1].click(); await sleep(20);
+  document.querySelectorAll('#body .row')[1].click(); await sleep(20);
+  out.changed = saved();
+  window.__on.reload(); await sleep(20);
+  const drawn = window.__settings, raws = drawn.meters;
+  // The list changed while the choices were open: the source lands on the meter that was changed,
+  // wherever it now stands; with that meter gone nothing is written
+  rows()[1].click(); await sleep(20);
+  document.querySelector('#body .does .btn').click(); await sleep(20);
+  window.__settings = { ...drawn, meters: [raws[1], raws[0], raws[2], raws[3]] };
+  document.querySelectorAll('#body .row')[1].click(); await sleep(20);
+  document.querySelectorAll('#body .row')[1].click(); await sleep(50);
+  out.changedMoved = saved();
+  window.__settings = drawn; window.__on.reload(); await sleep(20);
+  const saves = () => window.__calls.filter(c => c[0] === 'save_meters').length, savesBefore = saves();
+  rows()[1].click(); await sleep(20);
+  document.querySelector('#body .does .btn').click(); await sleep(20);
+  window.__settings = { ...drawn, meters: [raws[0], raws[2], raws[3]] };
+  document.querySelectorAll('#body .row')[1].click(); await sleep(20);
+  document.querySelectorAll('#body .row')[1].click(); await sleep(50);
+  out.changedGone = [saves() - savesBefore, $('toast-text').textContent];
+  // Of two meters alike, the one renamed is the one touched
+  window.__settings = { ...drawn, meters: [raws[0], raws[0], raws[3]] }; window.__on.reload(); await sleep(20);
+  rows()[1].click(); await sleep(20);
+  document.querySelector('#body .namebox input').value = 'Второй';
+  [...document.querySelectorAll('#foot .btn')].pop().click(); await sleep(50);
+  out.renamedSecond = saved().map(m => m.name);
+  window.__settings = drawn; window.__on.reload(); await sleep(20);
+  // Let go on the broken meter's row: the page shows the order the file gets
+  const grip0 = rows()[0].querySelector('.grip'), h0 = rows()[0].offsetHeight;
+  grip0.setPointerCapture = () => {};
+  const at0 = (type, y) => grip0.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 9, pointerType: 'touch', clientX: 20, clientY: y }));
+  at0('pointerdown', 100); at0('pointermove', 100 + 2 * h0); at0('pointerup', 100 + 2 * h0);
+  out.ontoBroken = [window.__calls.filter(c => c[0] === 'move_meter').map(c => c[1]).pop(), texts('#meters .row .lbl b')];
+  window.__on.reload(); await sleep(20);
+  // An AI service in its card: not connected offers Connect, which explains and starts the sign-in;
+  // a missing program offers to install it; a failed check offers to check again
+  rows()[3].click(); await sleep(20);
+  out.notConnected = [$('meter-state').querySelector('.lbl').textContent, texts('#meter-state .btn'), !!$('meter-state').querySelector('.btn.acc')];
+  $('meter-state').querySelector('.btn').click(); await sleep(20);
+  out.offer = [$('title').textContent, texts('#body .say p'), texts('#foot .btn')];
+  [...document.querySelectorAll('#foot .btn')].pop().click(); await sleep(20);
+  out.connected = calls('limit_sign_in');
+  // A sign-in already open is not opened twice: the page says so
+  window.__signInOpen = 'Вход уже открыт';
+  rows()[3].click(); await sleep(20);
+  $('meter-state').querySelector('.btn').click(); await sleep(20);
+  [...document.querySelectorAll('#foot .btn')].pop().click(); await sleep(20);
+  out.alreadyOpen = $('toast-text').textContent;
+  window.__signInOpen = null;
+  status({ claude: { state: 'missing' } }); window.__on.reload(); await sleep(30);
+  rows()[3].click(); await sleep(20);
+  out.missing = [$('meter-state').querySelector('.lbl').textContent, texts('#meter-state .btn')];
+  $('meter-state').querySelector('.btn').click(); await sleep(20);
+  out.install = calls('limit_install');
+  status({ claude: { state: 'error', reason: 'Не удалось узнать расход' } }); window.__on.reload(); await sleep(30);
+  rows()[3].click(); await sleep(20);
+  out.failed = [$('meter-state').querySelector('.lbl').textContent, texts('#meter-state .btn')];
+  $('meter-state').querySelector('.btn').click(); await sleep(20);
+  out.again = calls('limit_check');
+  $('close').click();
+  status({}); window.__on.reload(); await sleep(30);
+  // Added: the kinds with the file last; a program, a file, an AI service
   $('add-meter').click();
-  out.kinds = texts('#body .row .lbl b');
+  out.kinds = [texts('#body .row .lbl b'), texts('#body .row .lbl small').pop()];
   document.querySelectorAll('#body .row')[0].click(); await sleep(50);
   document.querySelector('#pinned-list .row').click(); await sleep(20);
   out.program = saved();
   window.__on.reload(); await sleep(20);
   $('add-meter').click();
-  document.querySelectorAll('#body .row')[1].click(); await sleep(50);
+  document.querySelectorAll('#body .row')[2].click(); await sleep(50);
   out.file = saved();
   window.__on.reload(); await sleep(20);
-  document.querySelector('#meters .row .btn.danger').click();
+  $('add-meter').click();
+  document.querySelectorAll('#body .row')[1].click(); await sleep(20);
+  out.services = [$('title').textContent, texts('#body .row .lbl b'), texts('#body .row .lbl small'), !$('back').hidden];
+  $('back').click(); await sleep(20);
+  out.backTo = texts('#body .row .lbl b');
+  // Not connected: added, and Connect offered at once
+  document.querySelectorAll('#body .row')[1].click(); await sleep(20);
+  document.querySelectorAll('#body .row')[0].click(); await sleep(20);
+  out.limit = saved();
+  out.limitOffer = [$('shade').classList.contains('on'), $('title').textContent, texts('#body .say p'), texts('#foot .btn')];
+  $('close').click();
+  window.__on.reload(); await sleep(20);
+  // Antigravity, which connects when added: added, nothing offered
+  $('add-meter').click();
+  document.querySelectorAll('#body .row')[1].click(); await sleep(20);
+  document.querySelectorAll('#body .row')[3].click(); await sleep(20);
+  out.antigravity = [saved().pop(), $('shade').classList.contains('on')];
+  window.__on.reload(); await sleep(20);
+  // Removed in its card, and put back
+  rows()[0].click(); await sleep(20);
+  document.querySelector('#foot .btn.danger').click();
   out.removed = saved();
   out.toast = $('toast').classList.contains('on');
   $('toast-undo').click();
@@ -2395,7 +2574,8 @@ const meterSettings = `(async () => {
   await sleep(20);
   window.__saveFails = true;
   const reads = () => window.__calls.filter(c => c[0] === 'get_settings').length, readsBefore = reads();
-  document.querySelector('#meters .row .btn.danger').click();
+  rows()[0].click(); await sleep(20);
+  document.querySelector('#foot .btn.danger').click();
   out.failingRows = texts('#meters .row .lbl b');
   await sleep(20);
   out.failedRows = texts('#meters .row .lbl b');
@@ -2405,31 +2585,64 @@ const meterSettings = `(async () => {
   window.__settings = { ...window.__settings, meters: [] }; window.__on.reload(); await sleep(20);
   out.empty = texts('#meters .say');
   window.__settings = { ...window.__settings, russian: false }; window.__on.reload(); await sleep(20);
-  out.en = [$('meters-head').textContent, $('meters-foot').textContent];
-  out.privacy = texts('#privacy .lbl b').some(t => t.includes('meters'));
+  out.en = [$('meters-head').textContent, $('meters-foot').textContent, texts('.nav span')];
+  out.privacy = texts('#privacy .lbl b').some(t => t.includes('indicators'));
+  out.privacyLimit = texts('#privacy .lbl b').filter(t => t.includes('AI usage')).length;
   document.documentElement.dataset.check = JSON.stringify(out);
 })();`;
-const ms = found(renderedDom([], meterSettings, 4000, 'settings.html', withMeters));
+const ms = found(renderedDom([], meterSettings, 9000, 'settings.html', withMeters));
 
-test('story 39: a meter is added from the program list or a file, removed and restored, keeping the rest', () => {
-  assert.equal(ms.head, 'ШкалыДобавить шкалу');
-  assert.deepEqual(ms.rows, ['Render', 'Backup', 'Both']);
-  assert.deepEqual(ms.lines, ['Прогресс программы', 'Число из файла backup.txt', 'Шкала не работает: удалите её или исправьте файл настроек']);
+test('story 39: indicators have a page, rows like the keys, a card that renames, changes the source, connects and removes', () => {
+  assert.deepEqual(ms.navs, ['Клавиши', 'Индикаторы', 'Соседние панели', 'Вид', 'Общие', 'О программе']);
+  assert.deepEqual(ms.pages, [['s-meters', false, true, false], ['s-docked', false, false, true], ['s-items', true, false, false]]);
+  assert.equal(ms.head, 'ИндикаторыДобавить индикатор');
+  assert.equal(ms.primary, 1);
+  assert.deepEqual(ms.rows, ['Render', 'Backup', 'Both', 'Claude']);
+  assert.deepEqual(ms.lines, ['Программа · render', 'Файл · backup.txt', 'Индикатор не работает: удалите его или исправьте файл настроек', 'Расход ИИ · Claude · Проверяем…']);
+  assert.equal(ms.spinner, true);
+  assert.deepEqual(ms.inline, [0, 4]);
+  assert.deepEqual(ms.resolved, ['Расход ИИ · Claude · Не подключено', true, true]);
+  assert.deepEqual(ms.grips, [true, true, false, true]);
+  assert.deepEqual(ms.meterMoved, [[{ from: 2, to: 0, name: 'Claude', target: null }], ['Claude', 'Render', 'Backup', 'Both']]);
   assert.equal(ms.icon, true);
-  assert.deepEqual(ms.kinds, ['Программа', 'Файл']);
   const before = withMeters.meters.map(m => m.raw);
+  assert.deepEqual(ms.card, ['Изменить', 'Render', ['Программа'], ['render'], ['Сменить'], ['Удалить', 'Отмена', 'Сохранить'], true]);
+  assert.deepEqual(ms.renamed, [{ name: 'Рендер', program: 'C:\\Tools\\render.exe', own: 1 }, ...before.slice(1)]);
+  assert.deepEqual(ms.changeTitle, ['Сменить источник', ['Программа', 'Расход ИИ', 'Файл']]);
+  assert.deepEqual(ms.changed, [before[0], { name: 'Backup', limit: 'chatgpt' }, ...before.slice(2)]);
+  assert.deepEqual(ms.notConnected, ['Не подключено', ['Подключить'], false]);
+  assert.deepEqual(ms.offer, ['Claude', ['Откроется официальный вход Claude в браузере. Войдите как обычно, и индикатор оживёт сам.', 'Откроется и служебное окно, оно закроется само после входа.'], ['Не сейчас', 'Подключить']]);
+  assert.deepEqual(ms.connected, ['claude']);
+  assert.equal(ms.alreadyOpen, 'Вход уже открыт');
+  assert.deepEqual(ms.changedMoved, [{ name: 'Backup', limit: 'chatgpt' }, before[0], before[2], before[3]]);
+  assert.deepEqual(ms.changedGone, [0, 'Индикатор изменился, пока карточка была открыта: ничего не сохранено']);
+  assert.deepEqual(ms.renamedSecond, ['Render', 'Второй', 'Claude']);
+  assert.deepEqual(ms.ontoBroken, [{ from: 0, to: 1, name: 'Render', target: 'C:\\Tools\\render.exe' }, ['Backup', 'Render', 'Both', 'Claude']]);
+  assert.deepEqual(ms.missing, ['Программа не найдена', ['Установить Claude Code']]);
+  assert.deepEqual(ms.install, ['claude']);
+  assert.deepEqual(ms.failed, ['Не удалось проверить', ['Проверить ещё']]);
+  assert.deepEqual(ms.again, ['claude']);
+  assert.deepEqual(ms.kinds, [['Программа', 'Расход ИИ', 'Файл'], 'Для опытных: текстовый файл с числом от 0 до 100']);
   assert.deepEqual(ms.program, [...before, { name: 'Paint Studio', program: 'C:\\Apps\\paint.exe', app: 'Vendor.Paint' }]);
   assert.deepEqual(ms.file, [...before, { name: 'Report.final', file: 'D:\\data\\Report.final.txt' }]);
+  assert.deepEqual(ms.services, ['Расход ИИ', ['Claude', 'ChatGPT', 'Antigravity · Gemini', 'Antigravity · Claude и GPT'],
+    ['Аккаунт Claude', 'Не подключено', 'Аккаунт ChatGPT', 'Подключено', 'Antigravity, модели Gemini', 'Программа не найдена', 'Antigravity, модели Claude и GPT', 'Подключится при добавлении'], true]);
+  assert.deepEqual(ms.backTo, ['Программа', 'Расход ИИ', 'Файл']);
+  assert.deepEqual(ms.limit, [...before, { name: 'Claude', limit: 'claude' }]);
+  assert.deepEqual(ms.limitOffer, [true, 'Claude', ['Откроется официальный вход Claude в браузере. Войдите как обычно, и индикатор оживёт сам.', 'Откроется и служебное окно, оно закроется само после входа.'], ['Не сейчас', 'Подключить']]);
+  assert.deepEqual(ms.antigravity, [{ name: 'Antigravity · Claude и GPT', limit: 'antigravity-claude' }, false]);
   assert.deepEqual(ms.removed, before.slice(1));
   assert.equal(ms.toast, true);
   assert.deepEqual(ms.restored, before);
-  assert.deepEqual(ms.failingRows, ['Backup', 'Both']);
-  assert.deepEqual(ms.failedRows, ['Render', 'Backup', 'Both']);
+  assert.deepEqual(ms.failingRows, ['Backup', 'Both', 'Claude']);
+  assert.deepEqual(ms.failedRows, ['Render', 'Backup', 'Both', 'Claude']);
   assert.equal(ms.failedToast, 'the file is locked');
   assert.equal(ms.readAgain, 1);
-  assert.deepEqual(ms.empty, ['Шкал нет. Шкала показывает прогресс программы или число из файла']);
-  assert.deepEqual(ms.en, ['MetersAdd a meter', 'Meters sit in the capsule under the keys. Drag the line between the keys and the meters with a finger.']);
+  assert.deepEqual(ms.empty, ['Индикаторов пока нет. Индикатор показывает прогресс программы или расход ИИ.']);
+  assert.deepEqual(ms.en, ['IndicatorsAdd an indicator', 'The order can also be changed on the capsule with a long press. Drag the line between the keys and the indicators with a finger.',
+    ['Keys', 'Indicators', 'Nearby panels', 'Look', 'General', 'About']]);
   assert.equal(ms.privacy, true);
+  assert.equal(ms.privacyLimit, 2);
 });
 
 // Docking in the settings window: the docked panels by program, one that goes back by itself
@@ -2460,8 +2673,13 @@ const dockSettings = `(async () => {
   out.head = $('docked-head').textContent;
   out.rows = texts('#docked .row .lbl b');
   out.lines = texts('#docked .row .lbl small');
-  out.problem = [...document.querySelectorAll('#docked .row .lbl small')].map(e => e.classList.contains('problem'));
+  out.problem = [...document.querySelectorAll('#docked .row .lbl small')].map(e => e.classList.contains('warn'));
   out.icon = !!document.querySelector('#docked .row .key img');
+  out.inline = [document.querySelectorAll('#docked .row .btn').length, document.querySelectorAll('#docked .row .chev').length];
+  // A panel's card: its state and why, Remove at the bottom
+  document.querySelectorAll('#docked .row')[1].click(); await sleep(20);
+  out.sheet = [$('title').textContent, texts('#body .does .lbl b'), texts('#body .does .lbl small'), texts('#foot .btn'), !!document.querySelector('#foot .btn.danger')];
+  $('close').click();
   out.foot = $('docked-foot').textContent;
   $('add-docked').click(); await sleep(20);
   out.title = $('title').textContent;
@@ -2480,7 +2698,8 @@ const dockSettings = `(async () => {
   out.closed = !$('shade').classList.contains('on');
   out.afterDock = texts('#docked .row .lbl b');
   window.__settings = withDockedThen; window.__on.reload(); await sleep(20);
-  document.querySelectorAll('#docked .row .btn.danger')[0].click();
+  document.querySelectorAll('#docked .row')[0].click(); await sleep(20);
+  document.querySelector('#foot .btn.danger').click();
   out.removed = saved();
   out.removedRows = texts('#docked .row .lbl b');
   out.toast = $('toast-text').textContent;
@@ -2489,7 +2708,8 @@ const dockSettings = `(async () => {
   out.restoredRows = texts('#docked .row .lbl b');
   // The file cannot be written: the row comes back and the page says why
   window.__saveFails = true;
-  document.querySelectorAll('#docked .row .btn.danger')[1].click();
+  document.querySelectorAll('#docked .row')[1].click(); await sleep(20);
+  document.querySelector('#foot .btn.danger').click();
   out.failingRows = texts('#docked .row .lbl b');
   await sleep(20);
   out.failedRows = texts('#docked .row .lbl b');
@@ -2504,25 +2724,26 @@ const dockSettings = `(async () => {
   out.empty = texts('#docked .say');
   window.__settings = { ...withDockedThen, russian: false }; window.__on.reload(); await sleep(20);
   out.en = [$('docked-head').textContent, $('docked-foot').textContent, ...texts('#docked .row .lbl small')];
-  out.privacy = texts('#privacy .lbl b').some(t => t.includes('docked'));
+  out.privacy = texts('#privacy .lbl b').some(t => t.includes('nearby panels'));
   // A program with several windows the entry could be: the page asks for it to be picked again
   const several = { ...withDockedThen, docked: [{ raw: ${JSON.stringify(notch)}, name: 'Notch', icon: null, state: 'several' }] };
   window.__settings = several; window.__on.reload(); await sleep(20);
-  out.several = [...texts('#docked .row .lbl small'), document.querySelector('#docked .row .lbl small').classList.contains('problem')];
+  out.several = [...texts('#docked .row .lbl small'), document.querySelector('#docked .row .lbl small').classList.contains('warn')];
   window.__settings = { ...several, russian: false }; window.__on.reload(); await sleep(20);
   out.severalEn = texts('#docked .row .lbl small');
   document.documentElement.dataset.check = JSON.stringify(out);
 })();`;
 const dk = found(renderedDom([], `const withDockedThen = ${JSON.stringify(withDocked)};` + dockSettings, 4000, 'settings.html', withDocked));
 
-test('story 41: a panel at the edge is ticked and docked, a docked one is removed and restored, in Russian and English', () => {
+test('story 41: a panel at the edge is ticked and added, a nearby panel is removed in its card and restored, in Russian and English', () => {
   const raws = withDocked.docked.map(d => d.raw);
-  assert.equal(dk.head, 'СтыковкаПристыковать панель');
+  assert.equal(dk.head, 'Соседние панелиДобавить панель');
   assert.deepEqual(dk.rows, ['Notch', 'Side Bar', 'Lock', '—']);
-  assert.deepEqual(dk.lines, ['Стоит под капсулой', 'Возвращается на своё место, Tapka её не двигает', 'Windows не даёт Tapka её двигать',
-    'Запись не работает: удалите её или исправьте файл настроек']);
+  assert.deepEqual(dk.lines, ['Стоит под капсулой', 'Держит своё место сама, Tapka не может её сдвинуть', 'Windows не разрешает её сдвинуть', 'Запись не работает']);
   assert.deepEqual(dk.problem, [false, true, true, true]);
   assert.equal(dk.icon, true);
+  assert.deepEqual(dk.inline, [0, 4]);
+  assert.deepEqual(dk.sheet, ['Side Bar', ['Держит своё место сама, Tapka не может её сдвинуть'], ['Панель сама возвращается на своё место, поэтому Tapka её больше не двигает.'], ['Убрать', 'Закрыть'], true]);
   assert.equal(dk.foot, 'Tapka ставит выбранные панели под капсулой и ведёт их вместе с ней.');
   assert.equal(dk.title, 'Панели у края капсулы');
   // The docked window is not offered again, nor any window of the program an old entry names;
@@ -2530,7 +2751,7 @@ test('story 41: a panel at the edge is ticked and docked, a docked one is remove
   assert.deepEqual(dk.offered, ['Notch', 'Dial', 'Dial', 'Clock']);
   assert.deepEqual(dk.offeredSub, ['notch.exe', 'dial.exe', 'dial.exe', 'clock.exe']);
   assert.equal(dk.untickedSaved, true);
-  assert.equal(dk.untickedToast, 'Отметьте панели, которые пристыковать');
+  assert.equal(dk.untickedToast, 'Отметьте панели, которые добавить');
   // Two windows of one program and class are one entry: ticking one unticks the other
   assert.deepEqual(dk.ticks, [false, false, true, false]);
   assert.deepEqual(dk.chosen, ['22:5:1']);
@@ -2540,17 +2761,16 @@ test('story 41: a panel at the edge is ticked and docked, a docked one is remove
   assert.deepEqual(dk.afterDock, ['Notch', 'Side Bar', 'Lock', '—', 'Dial']);
   assert.deepEqual(dk.removed, raws.slice(1));
   assert.deepEqual(dk.removedRows, ['Side Bar', 'Lock', '—']);
-  assert.equal(dk.toast, 'Панель отстыкована: Notch');
+  assert.equal(dk.toast, 'Панель убрана: Notch');
   assert.deepEqual(dk.restored, raws);
   assert.deepEqual(dk.restoredRows, ['Notch', 'Side Bar', 'Lock', '—']);
   assert.deepEqual(dk.failingRows, ['Notch', 'Lock', '—']);
   assert.deepEqual(dk.failedRows, ['Notch', 'Side Bar', 'Lock', '—']);
   assert.equal(dk.failedToast, 'the file is locked');
   assert.deepEqual(dk.none, ['У края капсулы сейчас нет панелей других программ поверх окон']);
-  assert.deepEqual(dk.empty, ['Пристыкованных панелей нет. Панель другой программы у того же края можно поставить под капсулу']);
-  assert.deepEqual(dk.en, ['DockingDock a panel', 'Tapka puts the chosen panels under the capsule and carries them along.',
-    'Stands under the capsule', 'Returns to its own place, Tapka leaves it alone', 'Windows does not let Tapka move it',
-    'This entry does not work: remove it or fix the settings file']);
+  assert.deepEqual(dk.empty, ['Соседних панелей пока нет. Панель другой программы у того же края можно поставить под капсулу.']);
+  assert.deepEqual(dk.en, ['Nearby panelsAdd a panel', 'Tapka puts the chosen panels under the capsule and carries them along.',
+    'Stands under the capsule', 'Keeps its own place, Tapka cannot move it', 'Windows does not allow moving it', 'This entry does not work']);
   assert.equal(dk.privacy, true);
   assert.deepEqual(dk.several, ['Несколько окон — выберите заново', true]);
   assert.deepEqual(dk.severalEn, ['Several windows — pick again']);
@@ -2620,7 +2840,7 @@ const lostSettingsScript = `(async () => {
   $('close').click();
   out.rowLine = [texts('#items .row .lbl small')[2], document.querySelectorAll('#items .row .lbl small')[2].classList.contains('problem')];
   out.repaired = [$('repaired').hidden, texts('#repaired .lbl b'), texts('#repaired .lbl small')];
-  out.dock = [texts('#docked .row .lbl small'), document.querySelector('#docked .row .lbl small').classList.contains('problem')];
+  out.dock = [texts('#docked .row .lbl small'), document.querySelector('#docked .row .lbl small').classList.contains('warn')];
   // Read again, Rust no longer asks for the card nor has the line: neither comes back
   window.__settings = { ...window.__settings, card: null, repaired: [] }; window.__on.reload(); await sleep(20);
   out.again = [$('shade').classList.contains('on'), $('repaired').hidden];

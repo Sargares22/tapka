@@ -33,8 +33,9 @@ pub struct Item {
     pub action: Action,
 }
 
-/// A meter: a small dial of a program's progress or of a number in a file. In the file:
-/// `{ "name": "Render", "program": "C:\\Tools\\render.exe" }` or `{ "name": "Backup", "file": "D:\\backup.txt" }`.
+/// A meter: a small dial of a program's progress, of a number in a file or of an AI limit. In the
+/// file: `{ "name": "Render", "program": "C:\\Tools\\render.exe" }`, `{ "name": "Backup", "file": "D:\\backup.txt" }`
+/// or `{ "name": "Claude", "limit": "claude" }`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Meter {
     pub name: String,
@@ -51,6 +52,8 @@ pub enum Source {
     Program(String),
     /// A text file whose first number is the percent.
     File(String),
+    /// The usage limits of an AI service's sign-in on this machine (`limits`).
+    Limit(crate::limits::Service),
 }
 
 /// `"theme"` in the file: `"dark"`, `"light"`, or anything else for "as Windows has it".
@@ -493,7 +496,7 @@ pub fn with_moved(text: &str, key: &str, from: usize, to: usize) -> Option<Strin
 }
 
 /// What the page knows of the entry at `at` of the list `key` in the settings text, counted as
-/// `with_moved` counts: its name, and for a meter its program, none for a meter of a file. A move
+/// `with_moved` counts: its name, and for a meter its program, none for a meter of a file or a limit. A move
 /// goes by places, and the file may have changed since the page drew them.
 pub fn entry_at(text: &str, key: &str, at: usize) -> Option<(String, Option<String>)> {
     let (s, _) = parse(text).ok()?;
@@ -501,7 +504,7 @@ pub fn entry_at(text: &str, key: &str, at: usize) -> Option<(String, Option<Stri
         let m = s.meters.get(at)?;
         let program = match &m.source {
             Source::Program(p) => Some(p.clone()),
-            Source::File(_) => None,
+            Source::File(_) | Source::Limit(_) => None,
         };
         return Some((m.name.clone(), program));
     }
@@ -585,14 +588,16 @@ pub fn parse_item(v: &Value) -> Result<Item, String> {
     Ok(Item { name, icon: text_field(v, "icon"), hint: text_field(v, "hint"), lit, only_in, action })
 }
 
-/// One meter of the file, or why it cannot be used. It has one source: a program or a file.
+/// One meter of the file, or why it cannot be used. It has one source: a program, a file or a limit.
 pub fn parse_meter(v: &Value) -> Result<Meter, String> {
     let name = text_field(v, "name").ok_or("no name")?;
-    let source = match (text_field(v, "program"), text_field(v, "file")) {
-        (Some(program), None) => Source::Program(program),
-        (None, Some(file)) => Source::File(file),
-        (Some(_), Some(_)) => return Err("both a program and a file".into()),
-        (None, None) => return Err("no program and no file".into()),
+    let limit = text_field(v, "limit").map(|l| crate::limits::Service::named(&l).ok_or(format!("unknown limit \"{l}\""))).transpose()?;
+    let source = match (text_field(v, "program"), text_field(v, "file"), limit) {
+        (Some(program), None, None) => Source::Program(program),
+        (None, Some(file), None) => Source::File(file),
+        (None, None, Some(service)) => Source::Limit(service),
+        (None, None, None) => return Err("no program, file or limit".into()),
+        _ => return Err("more than one of a program, a file and a limit".into()),
     };
     Ok(Meter { name, source, app: text_field(v, "app") })
 }
@@ -891,6 +896,10 @@ mod tests {
         assert_ne!(entry_at(&program, "meters", 0), Some(("a".into(), None)));
         assert_eq!(entry_at(&program, "items", 0), Some(("k".into(), None)));
         assert_eq!(entry_at(&program, "meters", 2), None);
+        // A meter of a limit is counted and carried as a file's is, with no program
+        let limit = to_text(&json!({ "meters": [{ "name": "a", "file": "D:\\a.txt" }, { "name": "Claude", "limit": "claude" }], "items": [] }));
+        assert_eq!(entry_at(&limit, "meters", 1), Some(("Claude".into(), None)));
+        assert_eq!(names(&with_moved(&limit, "meters", 1, 0).unwrap()), "Claude a");
         assert_eq!(entry_at("not json", "meters", 0), None);
     }
 
@@ -980,6 +989,10 @@ mod tests {
             { "name": "Backup", "file": "D:\\backup.txt" },
             { "name": "Both", "program": "a.exe", "file": "b.txt" },
             { "name": "None" },
+            { "name": "Claude", "limit": "claude" },
+            { "name": "GPT", "limit": " ChatGPT " },
+            { "name": "Other", "limit": "gemini" },
+            { "name": "Two", "file": "b.txt", "limit": "claude" },
         ]);
         let out = with_field(OWN, "meters", meters).and_then(|text| with_field(&text, "divider", share(0.61237))).unwrap();
         assert!(out.contains("  \"note\": \"mine\",\n  \"meters\": [\n    { \"name\": \"Render\", \"program\": \"C:\\\\Tools\\\\render.exe\", \"app\": \"Vendor.Render\", \"mine\": 2 },\n"), "{out}");
@@ -992,11 +1005,14 @@ mod tests {
             [
                 Meter { name: "Render".into(), source: Source::Program("C:\\Tools\\render.exe".into()), app: Some("Vendor.Render".into()) },
                 Meter { name: "Backup".into(), source: Source::File("D:\\backup.txt".into()), app: None },
+                Meter { name: "Claude".into(), source: Source::Limit(crate::limits::Service::Claude), app: None },
+                Meter { name: "GPT".into(), source: Source::Limit(crate::limits::Service::Chatgpt), app: None },
             ]
         );
         assert_eq!(s.divider, Some(0.6124));
-        assert!(skipped.contains(&"meter 3 skipped: both a program and a file".to_string()), "{skipped:?}");
-        assert!(skipped.contains(&"meter 4 skipped: no program and no file".to_string()), "{skipped:?}");
+        for why in ["meter 3 skipped: more than one of a program, a file and a limit", "meter 4 skipped: no program, file or limit", "meter 7 skipped: unknown limit \"gemini\"", "meter 8 skipped: more than one of a program, a file and a limit"] {
+            assert!(skipped.contains(&why.to_string()), "{skipped:?}");
+        }
         // Read back and written again, the text stays as it is
         assert_eq!(to_text(&serde_json::from_str::<Value>(&out).unwrap()), out);
         // Moving the divider changes that one line; an empty list is no meters

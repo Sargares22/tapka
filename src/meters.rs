@@ -64,19 +64,31 @@ fn first_number(text: &str) -> Option<(f64, &str)> {
 const HINT_LINES: usize = 5;
 const HINT_WIDTH: usize = 80;
 
-/// What a meter shows: its percent, the outer ring a file may give with it, and the lines of hint
-/// a file may give for its label. A meter of a program has neither. `stale` and `notes` are what
-/// `dated` makes of the file's times: the meter is drawn grey while the writer has not read what it
-/// writes for longer than the file allows, and the label says so and when the numbers reset.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+/// What a meter shows: its percent, the outer ring a file may give with it, and what its label
+/// says. A meter of a program has only the percent. `stale`, `when` and `ago` are what `dated` makes
+/// of the times: the meter is drawn grey while the writer has not read what it writes for longer
+/// than it allows, and the label says so and when the numbers reset. A meter of an AI limit that
+/// has never been read has no percent, only the problem that says why.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct Reading {
-    pub value: u8,
+    pub value: Option<u8>,
     pub outer: Option<u8>,
+    /// Plain lines under the rows of the label: a file's own text, or a note of an AI limit.
     pub hint: Vec<String>,
+    /// The words the label puts before the percent and before the outer ring, `5 часов` and
+    /// `Неделя`; none for a file or a program.
+    pub rows: Vec<String>,
     #[serde(skip)]
     pub times: Times,
     pub stale: bool,
-    pub notes: Vec<String>,
+    /// When the percent and the outer ring reset, in words, each after its row; empty when unknown.
+    pub when: Vec<String>,
+    /// How long ago a stale reading was updated.
+    pub ago: Option<String>,
+    /// Why an AI limit could not be read, in the warning colour.
+    pub problem: Option<String>,
+    /// A tap on the meter starts the sign-in its problem asks for (`limits::sign_in`).
+    pub sign_in: bool,
 }
 
 /// The times a file gives in lines of their own, as seconds since 1970: when its writer last read
@@ -93,7 +105,7 @@ pub struct Times {
 
 impl Reading {
     fn percent(value: f64) -> Reading {
-        Reading { value: rounded(value), outer: None, hint: Vec::new(), times: Times::default(), stale: false, notes: Vec::new() }
+        Reading { value: Some(rounded(value)), ..Reading::default() }
     }
 }
 
@@ -171,8 +183,7 @@ pub fn file_reading(text: &str) -> Option<Reading> {
         .take(HINT_LINES)
         .map(|line| line.chars().take(HINT_WIDTH).collect::<String>().trim_end().to_string())
         .collect();
-    let reading = Reading { value: rounded(value), outer: outer.map(rounded), hint, times: Times::default(), stale: false, notes: Vec::new() };
-    Some(Reading { times, ..reading })
+    Some(Reading { value: Some(rounded(value)), outer: outer.map(rounded), hint, times, ..Reading::default() })
 }
 
 /// A span of time as the label says it: minutes, hours and minutes, or days and hours.
@@ -189,13 +200,13 @@ fn span(minutes: i64, russian: bool) -> String {
 }
 
 /// When the numbers reset, as the label says it at `now`: the time left, rounded up to a minute,
-/// within a day; the day and the local time further on; and once the moment has passed, that the
-/// file has not been written anew since. The percent itself stays as the file gives it.
+/// within a day; the weekday and the local time further on, with the date only more than six days
+/// off; and once the moment has passed, that they did. The percent itself stays as it was read.
 pub fn reset_words(at: i64, now: i64, russian: bool) -> String {
     use chrono::{Datelike, TimeZone};
     let left = at - now;
     if left <= 0 {
-        return (if russian { "срок прошёл, ждём обновления" } else { "due, waiting for an update" }).into();
+        return (if russian { "сбросился" } else { "reset" }).into();
     }
     if left < 24 * 3600 {
         let left = span((left + 59) / 60, russian);
@@ -203,37 +214,33 @@ pub fn reset_words(at: i64, now: i64, russian: bool) -> String {
     }
     let Some(when) = chrono::Local.timestamp_opt(at, 0).single() else { return String::new() };
     let (day, month, time) = (when.weekday().num_days_from_monday() as usize, when.month0() as usize, when.format("%H:%M"));
+    let dated = left > 6 * 24 * 3600;
     if russian {
         const DAYS: [&str; 7] = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
         const MONTHS: [&str; 12] = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-        format!("сброс {} {} {}, {time}", DAYS[day], when.day(), MONTHS[month])
+        let date = if dated { format!(" {} {}", when.day(), MONTHS[month]) } else { String::new() };
+        format!("сброс {}{date}, {time}", DAYS[day])
     } else {
         const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
         const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        format!("resets {} {} {}, {time}", DAYS[day], when.day(), MONTHS[month])
+        let date = if dated { format!(" {} {}", when.day(), MONTHS[month]) } else { String::new() };
+        format!("resets {}{date}, {time}", DAYS[day])
     }
 }
 
-/// A reading of a file as it stands at `now`, seconds since 1970: stale when its writer last read
-/// what it writes longer ago than the file allows (`FRESH_MINUTES` unless it says), and the lines its
-/// label says about time: when the percent and the outer ring reset, and how long ago it was
-/// updated, once that is stale. Made anew each round, so the words follow the clock while the file
-/// stays as it is.
+/// A reading as it stands at `now`, seconds since 1970: stale when its writer last read what it
+/// writes longer ago than it allows (`FRESH_MINUTES` unless it says), when the percent and the outer
+/// ring reset in words, and how long ago it was updated, once that is stale. Made anew each round,
+/// so the words follow the clock while the numbers stay as they are.
 pub fn dated(mut reading: Reading, now: i64, russian: bool) -> Reading {
-    let mut notes = Vec::new();
-    if let Some(at) = reading.times.reset {
-        notes.push(reset_words(at, now, russian));
-    }
-    if let Some(at) = reading.times.reset2 {
-        notes.push(format!("{} {}", if russian { "обводка:" } else { "outline:" }, reset_words(at, now, russian)));
-    }
+    let words = |at: Option<i64>| at.map(|at| reset_words(at, now, russian)).unwrap_or_default();
+    reading.when = if reading.times.reset.or(reading.times.reset2).is_some() { vec![words(reading.times.reset), words(reading.times.reset2)] } else { Vec::new() };
     let age = reading.times.updated.map(|at| now - at);
     reading.stale = age.is_some_and(|age| age as f64 > reading.times.fresh.unwrap_or(FRESH_MINUTES) * 60.0);
-    if let Some(age) = age.filter(|_| reading.stale) {
+    reading.ago = age.filter(|_| reading.stale).map(|age| {
         let ago = span(age / 60, russian);
-        notes.push(if russian { format!("обновлено {ago} назад") } else { format!("updated {ago} ago") });
-    }
-    reading.notes = notes;
+        if russian { format!("обновлено {ago} назад") } else { format!("updated {ago} ago") }
+    });
     reading
 }
 
@@ -394,12 +401,12 @@ pub fn read_files(meters: &[Meter], russian: bool) -> Vec<(usize, Option<Reading
     let now = chrono::Utc::now().timestamp();
     let files = meters.iter().enumerate().filter_map(|(i, m)| match &m.source {
         Source::File(path) => Some((i, path)),
-        Source::Program(_) => None,
+        Source::Program(_) | Source::Limit(_) => None,
     });
     files.map(|(i, path)| (i, read_file(path).map(|r| dated(r, now, russian)))).collect()
 }
 
-fn rounded(v: f64) -> u8 {
+pub fn rounded(v: f64) -> u8 {
     v.clamp(0.0, 100.0).round() as u8
 }
 
@@ -552,7 +559,7 @@ impl Reader {
             .enumerate()
             .filter_map(|(i, m)| match &m.source {
                 Source::Program(target) => Some((i, m, target)),
-                Source::File(_) => None,
+                Source::File(_) | Source::Limit(_) => None,
             })
             .collect();
         if programs.is_empty() {
@@ -669,7 +676,7 @@ mod tests {
 
     /// The percent a file gives, without its ring and hint.
     fn file_percent(text: &str) -> Option<u8> {
-        file_reading(text).map(|r| r.value)
+        file_reading(text).and_then(|r| r.value)
     }
 
     #[test]
@@ -697,7 +704,7 @@ mod tests {
         assert_eq!(read_file(&std::env::temp_dir().to_string_lossy()), None);
         let path = std::env::temp_dir().join(format!("tapka-meter-{}.txt", std::process::id()));
         std::fs::write(&path, [0xff, 0xff, 0x00, b'6', b'0']).unwrap();
-        assert_eq!(read_file(&path.to_string_lossy()).map(|r| r.value), Some(60));
+        assert_eq!(read_file(&path.to_string_lossy()).and_then(|r| r.value), Some(60));
         let _ = std::fs::remove_file(&path);
     }
 
@@ -715,13 +722,13 @@ mod tests {
         let path = std::env::temp_dir().join(format!("tapka-meter-utf16-{}.txt", std::process::id()));
         std::fs::write(&path, &le).unwrap();
         let read = read_files(&[Meter { name: "a".into(), source: Source::File(path.to_string_lossy().into()), app: None }], false);
-        assert_eq!(read.iter().map(|(i, r)| (*i, r.as_ref().map(|r| (r.value, r.stale)))).collect::<Vec<_>>(), [(0, Some((57, false)))]);
+        assert_eq!(read.iter().map(|(i, r)| (*i, r.as_ref().map(|r| (r.value, r.stale)))).collect::<Vec<_>>(), [(0, Some((Some(57), false)))]);
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn a_file_may_give_an_outer_ring_and_lines_of_hint() {
-        let reading = |value, outer, hint: &[&str]| Some(Reading { value, outer, hint: hint.iter().map(|l| l.to_string()).collect(), ..Reading::percent(0.0) });
+        let reading = |value, outer, hint: &[&str]| Some(Reading { value: Some(value), outer, hint: hint.iter().map(|l| l.to_string()).collect(), ..Reading::percent(0.0) });
         // One number: as before, no ring and no hint
         assert_eq!(file_reading("42\r\n"), reading(42, None, &[]));
         // Two numbers on the first line, parted by spaces or percent signs
@@ -769,7 +776,7 @@ mod tests {
         // The lines with these keys, in either language and any case, are no hint; the rest stays
         let text = "updated: 2026-10-21T10:00:00Z\nfresh: 15\n42 70\nCPU 42 %\nreset: 2026-10-21T12:33:00Z\nСброс2: 2026-10-26T08:00Z\nGPU";
         let r = file_reading(text).unwrap();
-        assert_eq!((r.value, r.outer, r.hint.clone()), (42, Some(70), vec!["CPU 42 %".to_string(), "GPU".to_string()]));
+        assert_eq!((r.value, r.outer, r.hint.clone()), (Some(42), Some(70), vec!["CPU 42 %".to_string(), "GPU".to_string()]));
         assert_eq!(r.times, Times { updated: Some(utc(2026, 10, 21, 10, 0)), fresh: Some(15.0), reset: Some(utc(2026, 10, 21, 12, 33)), reset2: Some(utc(2026, 10, 26, 8, 0)) });
         let ru = file_reading("обновлено: 2026-10-21T13:00+03:00\r\nсвежесть: 2,5\r\n7\r\nсброс: никогда").unwrap();
         assert_eq!(ru.times, Times { updated: Some(utc(2026, 10, 21, 10, 0)), fresh: Some(2.5), reset: None, reset2: None });
@@ -778,7 +785,7 @@ mod tests {
         let odd = file_reading("fresh: -3\nupdated: yesterday\n50\nfresh: abc\nnote: kept").unwrap();
         assert_eq!((odd.times.clone(), odd.hint.clone()), (Times::default(), vec!["note: kept".to_string()]));
         // The time lines may come before the percent; time lines alone are no value
-        assert_eq!(file_reading("reset: 2026-10-21T12:00Z\n\n33").map(|r| r.value), Some(33));
+        assert_eq!(file_reading("reset: 2026-10-21T12:00Z\n\n33").and_then(|r| r.value), Some(33));
         assert_eq!(file_reading("updated: 2026-10-21T12:00Z\nreset: 2026-10-21T13:00Z"), None);
     }
 
@@ -788,13 +795,14 @@ mod tests {
         let at = |updated: Option<i64>, fresh: Option<f64>| Reading { times: Times { updated, fresh, ..Times::default() }, ..Reading::percent(42.0) };
         // Five minutes by default: fresh up to them, stale past them, the percent kept
         let fresh = dated(at(Some(now - 300), None), now, true);
-        assert!(!fresh.stale && fresh.notes.is_empty());
+        assert!(!fresh.stale && fresh.ago.is_none() && fresh.when.is_empty());
         let stale = dated(at(Some(now - 301), None), now, true);
         assert!(stale.stale);
-        assert_eq!((stale.value, stale.notes.clone()), (42, vec!["обновлено 5 мин назад".to_string()]));
-        assert_eq!(dated(at(Some(now - 12 * 60 - 30), None), now, false).notes, ["updated 12 min ago"]);
-        assert_eq!(dated(at(Some(now - 2 * 3600 - 5 * 60), None), now, true).notes, ["обновлено 2 ч 5 мин назад"]);
-        assert_eq!(dated(at(Some(now - 3 * 86400 - 4 * 3600), None), now, false).notes, ["updated 3 d 4 h ago"]);
+        assert_eq!((stale.value, stale.ago.as_deref()), (Some(42), Some("обновлено 5 мин назад")));
+        let ago = |updated, russian| dated(at(Some(updated), None), now, russian).ago.unwrap();
+        assert_eq!(ago(now - 12 * 60 - 30, false), "updated 12 min ago");
+        assert_eq!(ago(now - 2 * 3600 - 5 * 60, true), "обновлено 2 ч 5 мин назад");
+        assert_eq!(ago(now - 3 * 86400 - 4 * 3600, false), "updated 3 d 4 h ago");
         // The file's own freshness
         assert!(!dated(at(Some(now - 14 * 60), Some(15.0)), now, false).stale);
         assert!(dated(at(Some(now - 16 * 60), Some(15.0)), now, false).stale);
@@ -815,27 +823,33 @@ mod tests {
         assert_eq!(reset_words(now + 3 * 3600, now, true), "сброс через 3 ч");
         assert_eq!(reset_words(now + 30, now, false), "resets in 1 min");
         assert_eq!(reset_words(now + 24 * 3600 - 60, now, true), "сброс через 23 ч 59 мин");
-        assert_eq!(reset_words(now + 24 * 3600, now, true), "сброс чт 22 окт, 08:27");
-        // Further off: the day of the week, the date and the local time
+        // Further off: the weekday and the local time, the date too only past six days
+        assert_eq!(reset_words(now + 24 * 3600, now, true), "сброс чт, 08:27");
         let monday = chrono::Local.with_ymd_and_hms(2026, 10, 26, 11, 0, 0).unwrap().timestamp();
-        assert_eq!(reset_words(monday, now, true), "сброс пн 26 окт, 11:00");
-        assert_eq!(reset_words(monday, now, false), "resets Mon 26 Oct, 11:00");
+        assert_eq!(reset_words(monday, now, true), "сброс пн, 11:00");
+        assert_eq!(reset_words(monday, now, false), "resets Mon, 11:00");
+        assert_eq!(reset_words(now + 6 * 86400, now, false), "resets Tue, 08:27");
+        assert_eq!(reset_words(now + 6 * 86400 + 60, now, true), "сброс вт 27 окт, 08:28");
         let may = chrono::Local.with_ymd_and_hms(2027, 5, 1, 9, 5, 0).unwrap().timestamp();
         assert_eq!(reset_words(may, now, true), "сброс сб 1 мая, 09:05");
-        // Past it: due, and the percent stays
-        assert_eq!(reset_words(now, now, true), "срок прошёл, ждём обновления");
-        assert_eq!(reset_words(now - 3600, now, false), "due, waiting for an update");
-        // In the label: the gauge's reset, the outline's, then how old a stale file is; the words
-        // follow the clock with the file as it was
+        assert_eq!(reset_words(may, now, false), "resets Sat 1 May, 09:05");
+        // Past it: reset, and the percent stays as read
+        assert_eq!(reset_words(now, now, true), "сбросился");
+        assert_eq!(reset_words(now - 3600, now, false), "reset");
+        // In the label: each reset after its own row, then how old a stale file is; the words follow
+        // the clock with the file as it was, and the outer ring is never called by a name of its own
         let r = file_reading("40 90\nreset: 2026-10-21T10:00\nreset2: 2026-10-26T11:00\nhint").unwrap();
         let r = Reading { times: Times { updated: Some(now - 600), ..r.times.clone() }, ..r };
         let label = dated(r.clone(), now, false);
         assert!(label.stale);
-        assert_eq!(label.notes, ["resets in 1 h 33 min", "outline: resets Mon 26 Oct, 11:00", "updated 10 min ago"]);
-        assert_eq!((label.value, label.outer, label.hint.clone()), (40, Some(90), vec!["hint".to_string()]));
+        assert_eq!((label.when.clone(), label.ago.clone()), (vec!["resets in 1 h 33 min".to_string(), "resets Mon, 11:00".to_string()], Some("updated 10 min ago".to_string())));
+        assert_eq!((label.value, label.outer, label.hint.clone(), label.rows.clone()), (Some(40), Some(90), vec!["hint".to_string()], vec![]));
         let later = dated(r.clone(), now + 60, true);
-        assert_eq!(later.notes, ["сброс через 1 ч 32 мин", "обводка: сброс пн 26 окт, 11:00", "обновлено 11 мин назад"]);
-        assert_eq!(dated(r, now + 2 * 3600, false).notes[0], "due, waiting for an update");
+        assert_eq!((later.when.clone(), later.ago.clone()), (vec!["сброс через 1 ч 32 мин".to_string(), "сброс пн, 11:00".to_string()], Some("обновлено 11 мин назад".to_string())));
+        assert_eq!(dated(r, now + 2 * 3600, false).when[0], "reset");
+        // Only the outer ring's reset: the first row has no time
+        let second = dated(Reading { times: Times { reset2: Some(monday), ..Times::default() }, ..Reading::percent(5.0) }, now, true);
+        assert_eq!(second.when, ["", "сброс пн, 11:00"]);
     }
 
     #[test]
@@ -851,7 +865,7 @@ mod tests {
         // The file's own line wins over its time
         std::fs::write(&path, "64\nupdated: 2020-01-01T00:00Z\n").unwrap();
         let old = read_files(&meters, true)[0].1.clone().unwrap();
-        assert!(old.stale && old.notes[0].starts_with("обновлено ") && old.value == 64);
+        assert!(old.stale && old.ago.as_ref().unwrap().starts_with("обновлено ") && old.value == Some(64));
         // Garbage, or gone: nothing, which the page draws grey with no percent
         std::fs::write(&path, "updated: 2026-10-21T10:00Z\nnot a number").unwrap();
         assert_eq!(read_files(&meters, false), [(0, None)]);

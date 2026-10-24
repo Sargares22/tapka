@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod actions;
+mod agy;
 mod apps;
 mod autostart;
 mod config;
@@ -9,6 +10,7 @@ mod glyphs;
 mod grab;
 mod keys;
 mod layout;
+mod limits;
 mod meters;
 mod repair;
 mod shellicon;
@@ -179,12 +181,19 @@ struct PageMeter {
     value: Option<u8>,
     /// The thin ring around the dial, from a file's second number.
     outer: Option<u8>,
-    /// The lines of hint a file gives: its label shows them under the percent.
+    /// What its label says, as `meters::Reading` has it: plain lines under the rows, the rows' names,
+    /// when each resets, how old a stale reading is, and a problem in the warning colour.
     hint: Vec<String>,
-    /// A file not updated for longer than it allows: the dial is grey and keeps its percent.
+    rows: Vec<String>,
+    when: Vec<String>,
+    ago: Option<String>,
+    problem: Option<String>,
+    /// Not updated for longer than it allows: the dial is grey and keeps its percent.
     stale: bool,
-    /// What its label says about time, before the hint (`meters::dated`).
-    notes: Vec<String>,
+    /// The AI service of a meter of a limit, as the settings file names it; a tap on it starts that
+    /// service's sign-in while `sign_in` says it is what is wrong.
+    limit: Option<&'static str>,
+    sign_in: bool,
 }
 
 /// An item's picture: `(data URL, built-in SVG)`, at most one of them. In order: the built-in the
@@ -385,6 +394,8 @@ struct View {
     lost: &'static str,
     /// What the label of a meter with nothing found says in place of its percent.
     no_data: &'static str,
+    /// The muted line under the name of a meter of an AI limit: its percents are what is used.
+    used: &'static str,
     /// The change of the items this view is of (`items_age`): an event `rims` of another names the
     /// places of another list.
     age: u32,
@@ -439,18 +450,26 @@ fn get_view(app: AppHandle) -> View {
         .map(|(i, m)| {
             let program = match &m.source {
                 config::Source::Program(target) => Some(target),
-                config::Source::File(_) => None,
+                config::Source::File(_) | config::Source::Limit(_) => None,
             };
-            let reading = values.get(i).cloned().flatten();
+            let r = values.get(i).cloned().flatten().unwrap_or_default();
             PageMeter {
                 name: m.name.clone(),
                 icon: program.and_then(|t| shell_icon(t)),
                 target: program.cloned(),
-                value: reading.as_ref().map(|r| r.value),
-                outer: reading.as_ref().and_then(|r| r.outer),
-                stale: reading.as_ref().is_some_and(|r| r.stale),
-                notes: reading.as_ref().map(|r| r.notes.clone()).unwrap_or_default(),
-                hint: reading.map(|r| r.hint).unwrap_or_default(),
+                value: r.value,
+                outer: r.outer,
+                hint: r.hint,
+                rows: r.rows,
+                when: r.when,
+                ago: r.ago,
+                problem: r.problem,
+                stale: r.stale,
+                limit: match m.source {
+                    config::Source::Limit(service) => Some(service.name()),
+                    _ => None,
+                },
+                sign_in: r.sign_in,
             }
         })
         .collect();
@@ -458,6 +477,7 @@ fn get_view(app: AppHandle) -> View {
     let add = if russian { ("Добавить", "Настройки и сворачивание капсулы") } else { ("Add", "Settings and folding the capsule") };
     let lost = if russian { "Программа не найдена — коснитесь, чтобы выбрать" } else { "Program not found — tap to choose" };
     let no_data = if russian { "нет данных" } else { "no data" };
+    let used = if russian { "израсходовано" } else { "used" };
     let (gear, fold) = if russian {
         (("Настройки", "Открыть окно настроек"), ("Свернуть", "Свернуть капсулу в одну клавишу"))
     } else {
@@ -500,6 +520,7 @@ fn get_view(app: AppHandle) -> View {
         divider: settings.divider,
         lost,
         no_data,
+        used,
         age,
         gear: Sign { name: gear.0, hint: gear.1, glyph: glyph("gear") },
         fold: Sign { name: fold.0, hint: fold.1, glyph: glyph(to_edge) },
@@ -1361,6 +1382,50 @@ fn save_items(app: AppHandle, items: Vec<Value>, added: Option<usize>) -> Result
 #[tauri::command(async)]
 fn save_meters(app: AppHandle, meters: Vec<Value>) -> Result<(), String> {
     write_field(&app, "meters", Value::Array(meters))
+}
+
+/// Starts the sign-in of an AI service's own program in a console the person sees
+/// (`limits::sign_in`), from the settings window or a tap on its meter; why not, in words. When one
+/// it started for the service is still open, it starts none and says so, for the page to show.
+#[tauri::command(async)]
+fn limit_sign_in(app: AppHandle, service: String) -> Result<Option<String>, String> {
+    let service = limits::Service::named(&service).ok_or_else(|| format!("unknown service \"{service}\""))?;
+    let russian = is_russian(&app.state::<AppState>().settings.lock().unwrap());
+    match limits::sign_in(service, russian) {
+        Ok(Some(program)) => applog(&app, &format!("limits: {}: sign-in started ({})", service.name(), program.display())),
+        Ok(None) => return Ok(Some((if russian { "Вход уже открыт" } else { "Sign-in is already open" }).into())),
+        Err(why) => {
+            applog(&app, &format!("limits: {}: sign-in not started ({why})", service.name()));
+            return Err(why);
+        }
+    }
+    Ok(None)
+}
+
+/// Where each AI service stands, by its name in the settings file (`limits::status`), for the
+/// settings window. Asks nothing over the network.
+#[tauri::command(async)]
+fn limit_status(app: AppHandle) -> Value {
+    let settings = app.state::<AppState>().settings.lock().unwrap().clone();
+    let used = |s: limits::Service| settings.meters.iter().any(|m| m.source == config::Source::Limit(s));
+    limits::Service::ALL.iter().map(|s| (s.name().to_string(), json!(limits::status(*s, used(*s), is_russian(&settings))))).collect::<serde_json::Map<_, _>>().into()
+}
+
+/// *Check again* beside a service whose read failed: it is asked again within seconds
+/// (`limits::check_now`).
+#[tauri::command]
+fn limit_check(app: AppHandle, service: String) -> Result<(), String> {
+    let service = limits::Service::named(&service).ok_or_else(|| format!("unknown service \"{service}\""))?;
+    limits::check_now(service);
+    applog(&app, &format!("limits: {}: asked again from the settings window", service.name()));
+    Ok(())
+}
+
+/// *Install* beside a service whose program is missing: its official page opens in the browser.
+#[tauri::command(async)]
+fn limit_install(service: String) -> Result<(), String> {
+    let service = limits::Service::named(&service).ok_or_else(|| format!("unknown service \"{service}\""))?;
+    win::open(limits::install_page(service)).map_err(|e| e.to_string())
 }
 
 /// The settings window hands over the whole list of docked entries, in its order, each as the file
@@ -2519,10 +2584,24 @@ fn watch_settings(app: AppHandle, mut by_keyboard: bool) {
 /// Reads the meters about once a second while the capsule is open on the screen, and tells the
 /// page when a value changed. The files and the programs are read in two threads, and both apart
 /// from the rest of the panel: UI Automation asks other programs, and one that hangs holds the
-/// answer up to its timeout, which no file and nothing else of the panel may wait for.
+/// answer up to its timeout, which no file and nothing else of the panel may wait for. The AI
+/// services are asked in threads of their own while a meter names them (`limits::watch`), those
+/// asked together in one (`limits::ASKED`); the files' thread shows what they last told, as it
+/// shows a file.
 fn watch_meters(app: AppHandle) {
+    for services in limits::ASKED {
+        let (app, log) = (app.clone(), app.clone());
+        let used = move |service| app.state::<AppState>().settings.lock().unwrap().meters.iter().any(|m| m.source == config::Source::Limit(service));
+        std::thread::spawn(move || limits::watch(services, used, |line| applog(&log, line)));
+    }
     let files = app.clone();
-    std::thread::spawn(move || poll_meters(&files, meters::read_files));
+    std::thread::spawn(move || {
+        poll_meters(&files, |list, russian| {
+            let mut found = meters::read_files(list, russian);
+            found.extend(limits::read(list, russian));
+            found
+        })
+    });
     std::thread::spawn(move || {
         let reader = match meters::Reader::new() {
             Ok(reader) => reader,
@@ -2683,6 +2762,10 @@ fn main() {
             set_pref,
             save_items,
             save_meters,
+            limit_sign_in,
+            limit_status,
+            limit_check,
+            limit_install,
             dock_candidates,
             save_docked,
             use_path,

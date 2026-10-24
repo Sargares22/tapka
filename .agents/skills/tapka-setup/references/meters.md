@@ -6,6 +6,7 @@
 |---|---|---|
 | Only needs to be opened | key | the exe or `shell:AppsFolder` target exists |
 | Shows progress on its taskbar button, in a progress bar of its window, or as a percent at the start of its title | `program` meter (and its key, which gets the ring) | `candidates.ps1` lists it under `progress` while it works, or its title starts with a number and `%` |
+| Is Claude Code, Codex (ChatGPT) or Antigravity, and the person wants its usage limits | `limit` meter: `{ "name": "Claude", "limit": "claude" }`, values `claude`, `chatgpt`, `antigravity-gemini`, `antigravity-claude`; no recipe | the program is installed and signed in (Settings → Indicators shows *Connected*) |
 | Keeps a number on the disk (a JSON, an INI, a log, a database the person owns) or prints it from a command | `file` meter fed by a recipe | you can read the number yourself with a short script |
 | A panel at the screen edge with nothing to read | docking, only with a yes by name | it stands in the `edge` list |
 | None of these | key only; say plainly that there is no number to show | — |
