@@ -2889,3 +2889,141 @@ test('story 42: a program found in another folder is offered on its card; an ope
   assert.deepEqual(ls.saved, { name: 'Paint 2', action: 'open', target: 'C:\\Apps\\app-1.3\\Paint.exe', mine: 1 });
   assert.equal(ls.replaced, 'Снимок');
 });
+
+// Tasks: what agents and scripts report, in a section only while there is one
+const taskScript = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  await sleep(50);
+  const out = {};
+  const section = () => document.getElementById('tasks');
+  out.none = [!!section(), !!document.getElementById('taskline')];
+  const task = (name, percent, more = {}) => ({ name, percent, status: '', stale: false, ago: null, elapsed: '3:07', ...more });
+  window.__view = { ...window.__view, more_tasks: ['ещё', 'Ещё задачи'] };
+  // Another number of cells draws anew: Rust has sized the window, and its view says how long the pill is
+  const set = async (list, cells) => { window.__view = { ...window.__view, tasks: list, task_cells: cells }; await window.__on.tasks({ payload: { cells, tasks: list } }); await sleep(30); };
+  const send = async (list, cells) => { await window.__on.tasks({ payload: { cells, tasks: list } }); await sleep(30); };
+  await set([task('Камера', 46.5, { status: 'DJI_0032: 3,6 из 4,0 ГБ' }), task('Монтаж', null)], 2);
+  const cells = () => [...document.querySelectorAll('.task')];
+  out.drawn = cells().map(b => b.querySelector('.t-name').textContent + ' ' + b.querySelector('.t-pct').textContent);
+  out.bar = cells()[0].querySelector('.t-bar i').style.width;
+  out.running = cells()[1].classList.contains('running');
+  out.order = [...document.getElementById('keys').children].map(b => b.id || b.className).slice(0, 4);
+  out.size = section().getBoundingClientRect().height;
+  // The same number of cells is painted where it stands: no drawing
+  const views = () => window.__calls.filter(c => c[0] === 'get_view').length;
+  const was = views(), first = cells()[0];
+  await send([task('Камера', 47, { status: 'DJI_0032: 3,7 из 4,0 ГБ' }), task('Монтаж', null, { elapsed: '3:08' })], 2);
+  out.painted = [views() === was, cells()[0] === first, first.querySelector('.t-pct').textContent, cells()[1].querySelector('.t-pct').textContent];
+  // A press shows the label with the status; a task's press taps nothing
+  const fire = (el, type) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 3, pointerType: 'touch', clientX: 10, clientY: 10 }));
+  fire(first, 'pointerdown');
+  const card = document.getElementById('card');
+  out.label = [card.hidden, card.querySelector('.c-title').textContent, card.querySelector('.c-pct').textContent, card.querySelector('.c-hint').textContent, card.classList.contains('of-task')];
+  // A new percent while its label is open says the new one
+  await send([task('Камера', 48, { status: 'DJI_0032: 3,8 из 4,0 ГБ' }), task('Монтаж', null)], 2);
+  out.live = [card.querySelector('.c-pct').textContent, card.querySelector('.c-hint').textContent];
+  fire(first, 'pointerup');
+  out.taps = window.__calls.filter(c => c[0] === 'tap').length;
+  // A quiet task is grey and says so
+  await send([task('Камера', 48, { stale: true, ago: 'не обновлялась 3 мин, возможно, зависла' }), task('Монтаж', null)], 2);
+  fire(cells()[0], 'pointerdown'); fire(cells()[0], 'pointerup');
+  out.stale = [cells()[0].classList.contains('stale'), card.querySelector('.c-problem').textContent, cells()[0].getAttribute('aria-label')];
+  // Thirty tasks take four cells: three tasks and how many more, whose label lists them and the rest as a count
+  const many = Array.from({ length: 30 }, (_, i) => task('Задача ' + i, i % 2 ? 10 : null, { name: 'Очень длинное название задачи номер ' + i }));
+  await set(many, 4);
+  out.many = [cells().length, section().getBoundingClientRect().height, cells()[3].querySelector('.t-name').textContent, cells()[3].querySelector('.t-pct').textContent, cells()[3].classList.contains('more')];
+  const nameBox = cells()[0].querySelector('.t-name');
+  out.cut = [nameBox.scrollWidth > nameBox.clientWidth, getComputedStyle(nameBox).textOverflow, Math.round(cells()[0].getBoundingClientRect().width) <= 60];
+  fire(cells()[3], 'pointerdown');
+  out.moreLabel = [card.querySelector('.c-title').textContent, card.querySelectorAll('.c-hint > div').length, card.querySelector('.c-hint').lastChild.textContent];
+  const rect = card.getBoundingClientRect();
+  out.labelFits = rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0;
+  fire(cells()[3], 'pointerup');
+  // Fewer than the cells: the cell of more becomes a task again without a drawing
+  const before = views();
+  await send(many.slice(0, 4), 4);
+  out.backToTask = [views() === before, cells()[3].classList.contains('more'), cells()[3].querySelector('.t-name').textContent];
+  // The section goes when the last task goes
+  await set([], 0);
+  out.gone = [document.querySelectorAll('.task').length, !!section()?.isConnected, !!document.getElementById('taskline')];
+  // A late list goes to no folded capsule
+  window.__view = { ...window.__view, folded: true, unfold: '', tasks: [], task_cells: 0 }; window.__on.reload(); await sleep(30);
+  await send([task('x', 1)], 1);
+  out.folded = document.querySelectorAll('.task').length;
+  document.body.dataset.ls = encodeURIComponent(JSON.stringify(out));
+})();`;
+
+test('tasks: a section only while there is a task, painted live, never more than its cells', () => {
+  const dom = renderedDom(items, taskScript, 6000);
+  const ls = JSON.parse(decodeURIComponent(dom.match(/data-ls="([^"]*)"/)[1]));
+  assert.deepEqual(ls.none, [false, false]);
+  assert.deepEqual(ls.drawn, ['Камера 46.5%', 'Монтаж 3:07']);
+  assert.equal(ls.bar, '46.5%');
+  assert.equal(ls.running, true);
+  // After the keys, behind its own line, before the foot
+  assert.deepEqual(ls.order, ['list', 'taskline', 'tasks', 'item add']);
+  assert.equal(ls.size, 104);
+  assert.deepEqual(ls.painted, [true, true, '47%', '3:08']);
+  assert.deepEqual(ls.label, [false, 'Камера', '47\u00a0%', 'DJI_0032: 3,7 из 4,0 ГБ', true]);
+  assert.deepEqual(ls.live, ['48\u00a0%', 'DJI_0032: 3,8 из 4,0 ГБ']);
+  assert.equal(ls.taps, 0);
+  assert.deepEqual(ls.stale, [true, 'не обновлялась 3 мин, возможно, зависла', 'Камера · 48% · не обновлялась 3 мин, возможно, зависла']);
+  assert.deepEqual(ls.many, [4, 208, 'ещё', '27', true]);
+  assert.deepEqual(ls.cut, [true, 'ellipsis', true]);
+  assert.deepEqual(ls.moreLabel, ['Ещё задачи: 27', 11, '+17']);
+  assert.equal(ls.labelFits, true);
+  assert.deepEqual(ls.backToTask, [true, false, 'Очень длинное название задачи номер 3']);
+  assert.deepEqual(ls.gone, [0, false, false]);
+  assert.equal(ls.folded, 0);
+});
+
+// A task's bar between rare writes: on by the speed of the last writes, never back, never far ahead
+const glideScript = `(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  await sleep(50);
+  const out = {};
+  const task = (id, percent, written, more = {}) => ({ id, name: id, percent, written, status: '', stale: false, ago: null, elapsed: '1:00', ...more });
+  const send = async list => { window.__view = { ...window.__view, tasks: list, task_cells: list.length }; await window.__on.tasks({ payload: { cells: list.length, tasks: list } }); await sleep(30); };
+  const bar = i => parseFloat(document.querySelectorAll('.task')[i].querySelector('.t-bar i').style.width);
+  const pct = i => document.querySelectorAll('.task')[i].querySelector('.t-pct').textContent;
+  // Three writes ten seconds apart, a percent more each: 0.1 percent a second
+  const t0 = Date.now();
+  await send([task('up', 10, t0 - 20000)]);
+  out.first = bar(0);
+  await send([task('up', 11, t0 - 10000)]);
+  await send([task('up', 12, t0)]);
+  await sleep(3000);
+  out.between = [bar(0), pct(0)];
+  // Quiet longer than a usual step: the bar stands a little past the last percent
+  await sleep(12000);
+  const stood = bar(0);
+  await sleep(3000);
+  out.stood = [stood, bar(0)];
+  // A write below where the bar stands: the number says it, the bar does not go back
+  await send([task('up', 12.5, Date.now())]);
+  out.slower = [bar(0), pct(0)];
+  // Work begun anew starts the bar again from its percent
+  await send([task('up', 2, Date.now())]);
+  out.anew = bar(0);
+  // A writer that says its speed moves the bar from its first write; a stale task stands
+  await send([task('up', 2, Date.now() - 1000), task('own', 20, Date.now(), { rate: 1 }), task('quiet', 30, Date.now(), { rate: 1, stale: true })]);
+  await sleep(2000);
+  out.own = [bar(1), bar(2)];
+  document.body.dataset.ls = encodeURIComponent(JSON.stringify(out));
+})();`;
+
+test('tasks: a bar moves on smoothly between rare writes, never back and never far ahead', () => {
+  const dom = renderedDom(items, glideScript, 40000);
+  const ls = JSON.parse(decodeURIComponent(dom.match(/data-ls="([^"]*)"/)[1]));
+  assert.equal(ls.first, 10);
+  // Three seconds after the write of 12 at 0.1 a second, the number still the file's
+  assert.ok(ls.between[0] > 12.2 && ls.between[0] < 12.4, ls.between[0]);
+  assert.equal(ls.between[1], '12%');
+  // No further than 1.2 of the ten-second step past 12, and standing there
+  assert.ok(Math.abs(ls.stood[0] - 13.2) < 0.01, ls.stood[0]);
+  assert.equal(ls.stood[1], ls.stood[0]);
+  assert.deepEqual(ls.slower, [ls.stood[0], '12.5%']);
+  assert.equal(ls.anew, 2);
+  assert.ok(ls.own[0] > 21.7 && ls.own[0] < 22.3, ls.own[0]);
+  assert.equal(ls.own[1], 30);
+});

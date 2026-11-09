@@ -71,6 +71,14 @@ for (const [theme, accent] of [['dark', '#8ab4ff'], ['light', '#ff8a3d']]) {
   const tall = '<style>html,body{width:348px!important;height:513px!important}body{position:relative}</style>';
   shoot('index.html', 'meters-file-' + theme, '348,513', { get_view: ringed }, tall + hoverMeter);
   shoot('index.html', 'meters-top-' + theme, '513,174', { get_view: { ...metered, edge: 'top' } }, '<style>html,body{width:513px!important;height:174px!important}</style>');
+  // The section of tasks at the side, with one of them quiet, and at the top
+  const tasked = { ...metered, pill: [471 + 14 + 3 * 52, 553 + 14 + 3 * 52], task_cells: 3, more_tasks: ['ещё', 'Ещё задачи'], tasks: [
+    { name: 'Камера', percent: 46.5, status: 'DJI_0032: 3,6 из 4,0 ГБ, 5,2 МБ/с', stale: false, ago: null, elapsed: '12:40' },
+    { name: 'Монтаж', percent: null, status: 'Склеиваю черновик', stale: false, ago: null, elapsed: '3:07' },
+    { name: 'Сборка', percent: 12, status: '', stale: true, ago: 'не обновлялась 3 мин, возможно, зависла', elapsed: '1:02:07' }] };
+  const hoverTask = "<script>setTimeout(()=>{const r=document.querySelector('.task').getBoundingClientRect();window.__on.hover({payload:[r.left+r.width/2,r.top+r.height/2]})},100)</script>";
+  shoot('index.html', 'tasks-' + theme, '348,683', { get_view: tasked }, '<style>html,body{width:348px!important;height:683px!important}body{position:relative}</style>' + hoverTask);
+  shoot('index.html', 'tasks-top-' + theme, '683,174', { get_view: { ...tasked, edge: 'top' } }, '<style>html,body{width:683px!important;height:174px!important}</style>');
   // The labels of meters, each hovered, in Russian, whose words are the longest: an AI limit with its
   // two rows and a problem; a file of two numbers with its own lines; a stale limit from Codex's log;
   // a limit never read; a program's one row; and an AI limit in English

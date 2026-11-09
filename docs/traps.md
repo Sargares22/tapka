@@ -106,6 +106,11 @@ The words are explained in `docs/map.md`. Read this before changing any code.
 - A step that failed reaches the page as the event `failed`. Rust drops a late one itself, if
   the list of items changed after the tap (`items_age`).
 
+- A task's bar between writes is timed by the file's own time (`written`), not by when the page heard
+  of the percent: the folder is read twice a second, and that half second on a ten-second step made the
+  speed jump. A write that leaves the percent as it was adds no point: a writer that writes its status
+  every two seconds and its percent every ten would make the usual step two seconds, and the bar stand.
+
 ## The settings file and key sets
 
 - What the running panel changes in the settings file goes through `change_settings` in
@@ -255,6 +260,34 @@ The words are explained in `docs/map.md`. Read this before changing any code.
   2.5 px past the square, and centred with the percent under it, it would run past the cell into
   the divider or the next meter. At the top edge the cell is as tall as the strip, so there it is
   centred.
+
+## The tasks
+
+- The tasks folder is not the data folder: a program from a package, as an agent's app may be, writes
+  to a private copy of `%APPDATA%`, and the panel would never see its task.
+- The section adds to the pill and takes nothing from the room the keys and the meters share, unless
+  the screen is too short for one cell of it (`layout::task_cells`): any number of tasks must leave the
+  keys and the meters where they are. Every place that sizes the capsule passes the number of cells
+  (`task_count`, `Carry`, `Geometry`), not of tasks, or the page draws a pill of another length than its
+  window. The section does not scroll: the last cell says how many more, and its label lists them. The section stands before the foot: the arrow's place counts from
+  the window's end (`layout::fold_spot`) and the keys do not move when a task comes, unless the
+  capsule has to be pulled back from the end of the work area.
+- A new number of cells waits while a carry or a drag of the end grip runs: both measured the window
+  when they began. A percent does not wait.
+- The file's time and size tell a new write (`Entry::stamp`), not whole seconds: two writes in a second
+  with a percent of one length would leave the first on the screen for good.
+- A file caught empty or half written keeps what it said before (`tasks::entry`): without that a writer
+  that truncates and writes makes the section blink. It is read again each round until it says something.
+- A task's life goes by the file's time, not by a line inside it: a line may be copied by a script that
+  hung, and a time in the future would never go stale.
+- Stale tasks leave by themselves after an hour (`GONE_SECONDS`), or a writer that died would keep the
+  section open for good. The panel does not delete the file: it writes nothing in that folder.
+- A drawing replaces the keys, which drops how far the list was scrolled, so the event `tasks` puts it
+  back after a drawing: a task that comes must not move the keys under the eye.
+
+- A flat capsule's window has room for 96 px under the strip, so a task's label there is cut by lines
+  (`#card.of-task`), and it is as wide as its words: placed by its middle near the window's far end, it
+  was squeezed to a few letters (seen 31.10.2026 on a screenshot of the real panel, no test saw it).
 
 ## The welcome
 

@@ -162,6 +162,24 @@ while ($true) {
 
 Apart from the AI limits, scripts for other programs live apart from Tapka: Tapka has no code for any of them. An AI agent writes such a script for you (see [Install with an AI agent](#install-with-an-ai-agent)).
 
+### Tasks
+
+Agents and scripts can show what they are working on, without any setting. The capsule gets a section
+of its own while a task is there and loses it when the last one goes. A task is a small text file in
+`%USERPROFILE%\.tapka\tasks`, named `<anything>.task`:
+
+```text
+name: Backup
+percent: 46.5
+status: 1 240 of 1 930 files
+fresh: 120
+```
+
+All lines are optional. Without `percent` the time of work shows, counted from `started:` (ISO 8601) or from when the file appeared. The section takes at most four cells and the last says how many more. Write the file to add or update the task, delete it to remove the task; the
+capsule shows the change within a second. Without `percent` a running bar shows. A file not written
+for `fresh` seconds (120 by default) turns the task grey and its label says how long it has been
+quiet; an hour later the task leaves the section.
+
 ## Recipes
 
 Apart from the AI limit meters, Tapka is not tied to any other program. Here is what people connect:

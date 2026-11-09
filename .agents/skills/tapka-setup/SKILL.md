@@ -50,6 +50,9 @@ order (`references/meters.md`):
 
 Then the same one question, apply, verify, summary.
 
+A job that runs for a while and then ends (a download, a render, an agent's long run) is no meter: it
+is a **task**, shown only while it runs, written by the job itself (`references/tasks.md`).
+
 ## The one question
 
 One message: what you found and what you will do, as a short list, ending in one question.

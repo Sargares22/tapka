@@ -38,6 +38,12 @@ Tapka is one binary, two pages and one settings file. Rust + Tauri 2 + WebView2.
   program gives its windows. A key whose program has a meter shows it as a **ring**
   along its rim. A key of an `open` item without a meter gets the same ring, a **rim**, while its
   program shows progress on its taskbar button, with no setting at all.
+- **Task** — something an agent or a script says it is working on: a small file of its own in the
+  **tasks folder** (`%USERPROFILE%\.tapka\tasks`, or `TAPKA_TASKS_DIR`). The capsule shows the tasks
+  in a **section** of their own between the meters and the foot, only while there is one: name, percent
+  or the time of work, and a bar, status in the label. It has at most four **cells**, as many as the work
+  area has room for (`layout::task_cells`); with more tasks the last cell says how many more. A task whose file stayed unwritten longer than it allows is
+  **stale**, grey with an orange bar; an hour later it leaves the section.
 - **Card of programs** — up to eight programs of the machine, all ticked, that *Add* makes keys
   of: the settings window opens it from the quiet line *Find my programs* under the items.
 - **Welcome** — the card of programs alone in a small window of its own beside the capsule (the
@@ -68,6 +74,7 @@ Tapka is one binary, two pages and one settings file. Rust + Tauri 2 + WebView2.
 | `src/limits.rs` | The meters of AI limits: Claude Code's and Codex's sign-ins, the questions to Anthropic and OpenAI, the token renewal, Codex's log of its last run, what each service last told (`limits::read`) |
 | `src/agy.rs` | Antigravity's quota: its command run hidden in a pseudo console inside a job that ends with all it started, the report read into a lane per group of models and window |
 | `src/meters.rs` | Where a docked window draws itself (`Reader::drawn`); the meters: a program's progress through UI Automation (its taskbar button, its windows' progress bars) or its window title, the number in a file; the rims of keys whose program shows taskbar progress |
+| `src/tasks.rs` | The tasks: where their folder is, a file read into what it says (`scan`), what the capsule shows at a moment, stale and gone included (`shown`) |
 | `src/dock.rs` | Docking, pure: which part of a docked window shows, where the docked panels stand under the capsule, which windows stand at its edge, when one that fights back is let be |
 | `src/repair.rs` | Path repair, pure but for what the `Machine` it is given answers: which targets are exe paths, the newest sibling version folder that holds the exe, whether a find is the same installation, what the look found (`Same`, `Elsewhere`, none, several), the paths that are lost, the settings text with the old paths put right, the lines the settings window shows about it |
 | `src/keys.rs` | Shortcut strings like `win+shift+s` |
@@ -191,6 +198,18 @@ and under each choice of *AI usage*. The card offers what can be done: *Connect*
 reads the states with the settings, when it comes to the front, every two seconds while one is
 `checking`, and every three seconds after *Connect* or *Check again*.
 
+**The tasks.** `watch_tasks` in `src/main.rs`, on a thread of its own, reads the tasks folder twice a
+second while the capsule is open (`tasks::scan`; a file is read again only when its time or size
+changed), works out what shows at that moment (`tasks::shown`) and how many cells it takes
+(`layout::task_cells`), both kept in `tasks` of the state. A changed list goes to the page as the event
+`tasks`, each second while a task shows its time of work. The page paints the same number of cells where
+they stand (`paintTasks`), with the words of an open label. The page keeps the last percents of
+each task by its `id`, timed by `written` (`track`), and moves its bar on between the writes
+(`glideOn`, `glideAt`) four times a second while it moves. Another number first sizes the window
+(`place_capsule`, `layout::tasks_length` through `layout::pill_length`), then the event; the page
+then asks `get_view`, which gives the tasks and the pill's length. Such a change waits while the
+capsule is carried or its length dragged. A press on a task shows its label and does nothing else.
+
 **The settings window's pages.** Keys, Indicators (the meters), Nearby panels (the docked panels),
 Look, General, About, each a `section` of `ui/settings.html`; the UI words changed, the names in
 the code and the settings file did not. The rows of the three lists open a card: `editItem`,
@@ -300,11 +319,14 @@ carry the capsule), `click` (a tap the page did not see, on the folded key: for 
 window to show), `rims` (the age of the items, and the items without a meter whose program shows
 taskbar progress, with the percent), `added` (`at`, the places of the keys the card of programs
 just added, which the capsule brings into view, and `tip`, the words it then says beside them),
+`tasks` (`cells`, and `tasks`, each with `id`, `name`, `percent`, `status`, `rate`, `written`, `stale`, `ago` and `elapsed`),
 `meters` (the generation of the list, `readings`, the count of changes of the values, and, for
 each meter, `value`, `outer`, `hint`, `rows`, `when`, `ago`, `problem` and `stale`, or null where nothing was found; `value` is null too for an AI limit never read, whose `problem` says why), `stretch` (a drag of the end grip ended without a save:
 what changed).
 
 # Setup by an agent
+
+How an agent or a script adds a task is in `.agents/skills/tapka-setup/references/tasks.md`.
 
 The README gives a phrase for a coding agent with the address of `docs/install.txt`. That note
 names the files of the skill `.agents/skills/tapka-setup/SKILL.md` by the release tag. The skill

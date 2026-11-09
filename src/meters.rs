@@ -187,7 +187,7 @@ pub fn file_reading(text: &str) -> Option<Reading> {
 }
 
 /// A span of time as the label says it: minutes, hours and minutes, or days and hours.
-fn span(minutes: i64, russian: bool) -> String {
+pub fn span(minutes: i64, russian: bool) -> String {
     let (d, h, m) = (minutes / 1440, minutes / 60 % 24, minutes % 60);
     let [day, hour, min] = if russian { ["д", "ч", "мин"] } else { ["d", "h", "min"] };
     match (d, h, m) {

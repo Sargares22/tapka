@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.0 (2026-11-09)
+
+- A section of tasks: agents and scripts show what they are working on by writing a small file. The section is in the capsule only while a task is there, shows the name, the percent and a bar, and follows the file within a second. Without a percent it shows how long it has run. The section takes at most four cells and never pushes keys or indicators off the screen; the last cell says how many more there are. A task whose file stopped changing turns grey and says how long it has been quiet; an hour later it leaves.
+- A task's bar moves smoothly between the writes of its file: at the speed of its last writes, or at the speed the file gives (`rate`). It never goes back and stops a little past the last percent when the file goes quiet. The number shown is always the file's own.
+
 ## 1.5.0 (2026-10-24)
 
 - AI usage indicators: Tapka shows how much of your Claude, ChatGPT or Antigravity limit is used, for the 5-hour window (the indicator) and the week (the thin second outline), with the time each one resets. It reads them through the sign-in of Claude Code, Codex or Antigravity on this computer, every five minutes while such an indicator is in the capsule. No script and no other program is needed.

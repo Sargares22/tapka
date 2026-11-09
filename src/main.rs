@@ -14,6 +14,7 @@ mod limits;
 mod meters;
 mod repair;
 mod shellicon;
+mod tasks;
 mod win;
 #[cfg(test)]
 mod stories;
@@ -86,6 +87,9 @@ struct AppState {
     /// The item whose card the settings window opens on, by its place in the settings' list: a
     /// tap on a grey key asked for it.
     card: Mutex<Option<usize>>,
+    /// The cells of the capsule's section and the tasks it shows, as `watch_tasks` last read them; no
+    /// cell, and it has no section.
+    tasks: Mutex<(usize, Vec<tasks::Task>)>,
 }
 
 /// The panel never says it is the latest version before a check has passed.
@@ -251,17 +255,23 @@ struct Carry {
     cell: f64,
     items: usize,
     meters: usize,
+    tasks: usize,
     length: Option<usize>,
     signs: bool,
     /// The capsule is folded: what is carried, and what lands, is the folded key.
     folded: bool,
 }
 /// What the capsule's length depends on besides its cells: the work area, px per CSS px, the
-/// cell, the keys that show, the meters, the edge, the place along it and the saved length.
-type Geometry = ((i32, i32, i32, i32), f64, f64, usize, usize, layout::Edge, f64, Option<usize>);
+/// cell, the keys that show, the meters, the edge, the place along it, the saved length and the tasks.
+type Geometry = ((i32, i32, i32, i32), f64, f64, usize, usize, layout::Edge, f64, Option<usize>, usize);
 
-fn geometry(work: (i32, i32, i32, i32), k: f64, cell: f64, shown: usize, settings: &config::Settings) -> Geometry {
-    (work, k, cell, shown, settings.meters.len(), settings.edge, settings.top, settings.length)
+fn geometry(work: (i32, i32, i32, i32), k: f64, cell: f64, shown: usize, settings: &config::Settings, tasks: usize) -> Geometry {
+    (work, k, cell, shown, settings.meters.len(), settings.edge, settings.top, settings.length, tasks)
+}
+
+/// How many cells the capsule's section has now.
+fn task_count(app: &AppHandle) -> usize {
+    app.state::<AppState>().tasks.lock().unwrap().0
 }
 
 /// What of the geometry changed, for the log.
@@ -274,7 +284,8 @@ fn what_changed(was: &Geometry, now: &Geometry) -> &'static str {
         _ if was.4 != now.4 => "the meters",
         _ if was.5 != now.5 => "the edge",
         _ if was.6 != now.6 => "the place",
-        _ => "the saved length",
+        _ if was.7 != now.7 => "the saved length",
+        _ => "the tasks",
     }
 }
 
@@ -382,6 +393,12 @@ struct View {
     reach: Vec<(usize, f64, f64)>,
     /// The meters under the keys, behind the divider; none, and the capsule is as it was.
     meters: Vec<PageMeter>,
+    /// The section of tasks, between the meters and the foot; none, and there is no section. With
+    /// more tasks than cells the last cell says how many more.
+    tasks: Vec<tasks::Task>,
+    task_cells: usize,
+    /// The words of the cell of more tasks: on it, and over the list in its label.
+    more_tasks: (&'static str, &'static str),
     /// The generation of the meters' values (`meters::Values`): an event `meters` of another one
     /// is about another list.
     generation: u64,
@@ -492,20 +509,23 @@ fn get_view(app: AppHandle) -> View {
     let glyph = |name| glyphs::builtin(name).unwrap_or_default();
     let cell = layout::cell(tablet);
     let (n, m) = (items.len(), settings.meters.len());
+    // A folded capsule is one key
+    let (t, tasks) = if settings.folded { (0, Vec::new()) } else { state.tasks.lock().unwrap().clone() };
+    let more_tasks = if russian { ("ещё", "Ещё задачи") } else { ("more", "More tasks") };
     let pill = work_area(&app).map(|(work, k)| {
-        let long = |signs| layout::pill_length(work, k, cell, n, m, settings.edge, signs, settings.length);
+        let long = |signs| layout::pill_length(work, k, cell, n, m, settings.edge, signs, settings.length, t);
         (long(false), long(true))
     });
     let room = work_area(&app).map(|(work, k)| {
-        let room = |signs| layout::room(work, k, cell, n, m, settings.edge, signs, settings.length);
+        let room = |signs| layout::room(work, k, cell, n, m, settings.edge, signs, settings.length, t);
         (room(false), room(true))
     });
     let reach = work_area(&app).map_or(Vec::new(), |(work, k)| {
-        let (_, most) = layout::reach(work, k, settings.top, cell, n, m, settings.edge, settings.length);
+        let (_, most) = layout::reach(work, k, settings.top, cell, n, m, settings.edge, settings.length, t);
         (layout::LEAST..=most)
             .map(|cells| {
-                let long = layout::pill_length(work, k, cell, n, m, settings.edge, true, Some(cells));
-                (cells, long, layout::room(work, k, cell, n, m, settings.edge, true, Some(cells)))
+                let long = layout::pill_length(work, k, cell, n, m, settings.edge, true, Some(cells), t);
+                (cells, long, layout::room(work, k, cell, n, m, settings.edge, true, Some(cells), t))
             })
             .collect()
     });
@@ -515,6 +535,9 @@ fn get_view(app: AppHandle) -> View {
         length: settings.length,
         reach,
         meters,
+        tasks,
+        task_cells: t,
+        more_tasks,
         generation,
         readings,
         divider: settings.divider,
@@ -904,7 +927,7 @@ fn resize(app: AppHandle, cells: Option<usize>, step: String, pointer: Option<St
     let Some((work, k)) = work_area(&app) else { return };
     let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
     let shown = shown_now(&app, &settings.items).len();
-    let (_, most) = layout::reach(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, settings.length);
+    let (_, most) = layout::reach(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, settings.length, task_count(&app));
     let cells = cells.map(|c| c.clamp(layout::LEAST, most));
     match step.as_str() {
         "start" => applog(&app, &format!("length: drag start {} ({})", settings.length.unwrap_or(shown.min(layout::SHOWN)), pointer.as_deref().unwrap_or("unknown"))),
@@ -930,7 +953,7 @@ fn set_length(app: AppHandle, cells: usize) -> Result<(), String> {
     let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
     let before = state.settings.lock().unwrap().clone();
     let shown = shown_now(&app, &before.items).len();
-    let (along, most) = layout::reach(work, k, before.top, cell, shown, before.meters.len(), before.edge, before.length);
+    let (along, most) = layout::reach(work, k, before.top, cell, shown, before.meters.len(), before.edge, before.length, task_count(&app));
     let cells = cells.clamp(layout::LEAST, most);
     // As the file will have it, so reading the file back changes nothing
     let top = config::share(along).as_f64().unwrap_or(along);
@@ -1020,7 +1043,7 @@ fn fold(app: AppHandle) -> Result<(), String> {
     let (work, k) = work_area(&app).ok_or("no screen")?;
     let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
     let shown = shown_now(&app, &settings.items).len();
-    let open = layout::window_rect_with(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, true, settings.length);
+    let open = layout::window_rect_with(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, true, settings.length, task_count(&app));
     let at = layout::along_from(work, k, layout::fold_spot(open, k, settings.edge), settings.edge);
     set_fold(&app, true, Some(at));
     Ok(())
@@ -1096,7 +1119,8 @@ fn place_capsule(app: &AppHandle, settings: &config::Settings) {
         // starts. A change of what that was worked out for (the keyboard, the program in front, the
         // settings, the screen) works it out anew, and ends a drag of the grip: the page is told
         // (`stretch`)
-        let now = geometry(work, k, cell, shown, settings);
+        let tasks = task_count(app);
+        let now = geometry(work, k, cell, shown, settings, tasks);
         let signs = state.signs.load(Ordering::Relaxed);
         let (stretch, ended) = {
             let mut stretched = state.stretched.lock().unwrap();
@@ -1105,7 +1129,7 @@ fn place_capsule(app: &AppHandle, settings: &config::Settings) {
                 *stretched = None;
             }
             if signs && stretched.is_none() {
-                let (along, most) = layout::reach(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, settings.length);
+                let (along, most) = layout::reach(work, k, settings.top, cell, shown, settings.meters.len(), settings.edge, settings.length, tasks);
                 *stretched = Some(Stretch { along, most, of: now, dragging: false });
             }
             (*stretched, ended)
@@ -1115,7 +1139,7 @@ fn place_capsule(app: &AppHandle, settings: &config::Settings) {
             let _ = app.emit("stretch", why);
         }
         let (along, length) = stretch.map_or((settings.top, settings.length), |s| (s.along, Some(s.most)));
-        layout::window_rect_with(work, k, along, cell, shown, settings.meters.len(), settings.edge, signs, length)
+        layout::window_rect_with(work, k, along, cell, shown, settings.meters.len(), settings.edge, signs, length, tasks)
     };
     if settings.folded {
         *state.stretched.lock().unwrap() = None;
@@ -1175,7 +1199,8 @@ fn carry_begin(app: &AppHandle, handle: isize) {
     let (cell, items) = (layout::cell(state.tablet.load(Ordering::Relaxed)), shown_now(app, &items).len());
     let offset = (capsule.0 - grip.0, capsule.1 - grip.1);
     let signs = state.signs.load(Ordering::Relaxed);
-    *state.carry.lock().unwrap() = Some(Carry { hwnd, offset, work, strip, k, cell, items, meters, length, signs, folded });
+    let tasks = task_count(app);
+    *state.carry.lock().unwrap() = Some(Carry { hwnd, offset, work, strip, k, cell, items, meters, tasks, length, signs, folded });
     state.card_open.store(false, Ordering::Relaxed);
     let _ = app.emit("carry", ());
 }
@@ -1195,7 +1220,7 @@ fn carry_step(app: &AppHandle, x: i32, y: i32) -> (i32, i32) {
     let landing = if c.folded {
         layout::folded_window(c.work, c.k, along, edge)
     } else {
-        layout::window_rect_with(c.work, c.k, along, c.cell, c.items, c.meters, edge, c.signs, c.length)
+        layout::window_rect_with(c.work, c.k, along, c.cell, c.items, c.meters, edge, c.signs, c.length, c.tasks)
     };
     grab::show_slot(layout::pill_on_screen(landing, c.k, edge), (layout::RADIUS * c.k).round() as i32, c.hwnd);
     (cx - ox, cy - oy)
@@ -2614,6 +2639,45 @@ fn watch_meters(app: AppHandle) {
     });
 }
 
+/// Reads the folder of the tasks twice a second, so a change shows within a second. A changed list
+/// goes to the page as the event `tasks`; another number of cells (`layout::task_cells`) sizes the
+/// window first, as the keys of a program in front do, and waits while the capsule is carried or its length dragged: what
+/// those measured when they began must stay true until they end.
+fn watch_tasks(app: AppHandle) {
+    let Some(dir) = tasks::folder() else { return };
+    let mut known = Vec::new();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let state = app.state::<AppState>();
+        let settings = state.settings.lock().unwrap().clone();
+        if !capsule_open(&app, settings.folded) {
+            continue;
+        }
+        known = tasks::scan(&dir, &known);
+        let now = tasks::shown(&known, chrono::Utc::now().timestamp(), is_russian(&settings));
+        let Some((work, k)) = work_area(&app) else { continue };
+        let cell = layout::cell(state.tablet.load(Ordering::Relaxed));
+        let shown = shown_now(&app, &settings.items).len();
+        let cells = layout::task_cells(work, k, cell, shown, settings.meters.len(), settings.edge, settings.length, now.len());
+        let (same, resized) = {
+            let told = state.tasks.lock().unwrap();
+            (told.0 == cells && told.1 == now, told.0 != cells)
+        };
+        if same {
+            continue;
+        }
+        if resized && (state.carry.lock().unwrap().is_some() || state.stretched.lock().unwrap().is_some_and(|s| s.dragging)) {
+            continue;
+        }
+        *state.tasks.lock().unwrap() = (cells, now.clone());
+        if resized {
+            applog(&app, &format!("tasks: {} in {cells} cells", now.len()));
+            place_capsule(&app, &settings);
+        }
+        let _ = app.emit("tasks", json!({ "cells": cells, "tasks": now }));
+    });
+}
+
 /// Whether the capsule is open on the screen: the meters and the rims are read only then.
 fn capsule_open(app: &AppHandle, folded: bool) -> bool {
     !folded && app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).is_some_and(|h| win::is_visible(h.0 as isize))
@@ -2824,6 +2888,7 @@ fn main() {
                 lost: Mutex::new(repair::Lost::default()),
                 notices: Mutex::new(repair::Notices::default()),
                 card: Mutex::new(None),
+                tasks: Mutex::new((0, Vec::new())),
             });
             grab::start(app.handle().clone());
             let capsule = app.get_webview_window("capsule").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize);
@@ -2856,6 +2921,7 @@ fn main() {
             watch_settings(app.handle().clone(), by_keyboard);
             watch_cursor(app.handle().clone());
             watch_meters(app.handle().clone());
+            watch_tasks(app.handle().clone());
             watch_docked(app.handle().clone());
             let handle = app.handle().clone();
             std::thread::spawn(move || check_paths(&handle));

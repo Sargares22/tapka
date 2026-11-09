@@ -146,7 +146,34 @@
   /* Carried by the handle: lifted, lit by the accent, keys dimmed */
   body.dragging #pill{border-radius:22px;transform:translateX(-8px) scale(1.03);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 70%,transparent),0 6px 12px rgba(0,0,0,.5)}
   body.dragging #grip::after{width:34px;background:var(--accent)}
-  body.dragging .key,body.dragging .meter{opacity:.6}
+  /* The section of tasks: there only while an agent or a script has a task, behind its own line,
+     lit a little by the accent. A task is its name, how far it is, and a bar that keeps moving while
+     the task's file keeps being written; quiet too long it is grey with the warning colour's mark. */
+  #taskline{position:relative;flex:0 0 14px}
+  #taskline::after{content:"";position:absolute;left:14px;right:14px;top:6.5px;height:1px;background:var(--bar)}
+  #tasks{
+    flex:0 0 auto;min-width:0;min-height:0;display:flex;flex-direction:column;align-items:stretch;
+    overflow:hidden;touch-action:none;
+    background:color-mix(in srgb,var(--accent) 9%,transparent);
+  }
+  .task{
+    flex:0 0 52px;width:100%;border:none;padding:3px 4px;background:none;color:inherit;font:inherit;overflow:hidden;
+    display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:2px;text-align:center;
+  }
+  .task.hot{background:var(--key-hot)}
+  .t-name{font-size:10px;line-height:13px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .t-pct{font-size:13px;line-height:16px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .t-bar{position:relative;display:block;height:3px;border-radius:2px;background:var(--track);overflow:hidden}
+  .t-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--accent);transition:width .3s}
+  /* A bar the page moves on between the writes, a step every GLIDE_MS: the steps are drawn as one line */
+  .task.glide .t-bar i{transition:width .25s linear}
+  .task.running .t-bar i{width:40%;animation:running 1.6s ease-in-out infinite alternate}
+  @keyframes running{from{left:0}to{left:60%}}
+  .task.running .t-pct{font-size:12px;font-weight:600}
+  .task.more .t-bar{visibility:hidden}
+  .task.stale .t-name,.task.stale .t-pct{color:var(--ink-dim)}
+  .task.stale .t-bar i{background:var(--warn);animation:none}
+  body.dragging .key,body.dragging .meter,body.dragging .task{opacity:.6}
   /* The name label, on the inner side of the pill, level with its key */
   #card{
     position:absolute;right:70px;transform:translateY(-50%);max-width:260px;
@@ -164,13 +191,22 @@
      note under them, and a problem in the warning colour under a thin line */
   #card.gauge .c-title{font-size:15px;font-weight:500}
   .c-rows{display:grid;grid-template-columns:auto auto auto;column-gap:10px;align-items:baseline;margin-top:3px}
-  .c-rows.bare{grid-template-columns:auto auto}
+  .c-rows.bare{grid-template-columns:auto 1fr}
   .c-rows:empty{display:none}
   .c-rows>div{font-size:11px;color:var(--ink-dim);white-space:nowrap}
   .c-rows>.c-pct{font-size:15px;font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums;text-align:right}
   .c-rows.stale>.c-pct{color:var(--ink-dim)}
   .c-problem{font-size:11px;color:var(--warn);margin-top:7px;padding-top:6px;border-top:.5px solid var(--track)}
   .c-problem:empty{display:none}
+  /* A task's label never grows past the window, whatever its writer wrote; flat, the window has room
+     for very little under the strip */
+  #card.of-task .c-title,#card.of-task .c-hint{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+  #card.of-task .c-title{-webkit-line-clamp:2}
+  #card.of-task .c-hint{-webkit-line-clamp:12}
+  body[data-edge="top"] #card.of-task .c-title,body[data-edge="top"] #card.of-task .c-problem{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden}
+  body[data-edge="top"] #card.of-task .c-rows{display:none}
+  body[data-edge="top"] #card.of-task .c-hint{-webkit-line-clamp:3}
+  body[data-edge="top"] #card.of-task .c-problem{margin-top:3px;padding-top:3px}
   /* At the left edge the strip and the label change sides; nothing else is mirrored */
   body[data-edge="left"] #pill{right:auto;left:0;border-radius:0 22px 22px 0}
   body[data-edge="left"] #card{right:auto;left:70px}
@@ -188,6 +224,9 @@
   body[data-edge="top"] .item{width:auto;height:100%}
   body[data-edge="top"] #meters{flex-direction:row;overflow-x:auto;overflow-y:hidden;mask-image:linear-gradient(to right,transparent,#000 var(--before),#000 calc(100% - var(--after)),transparent)}
   body[data-edge="top"] .meter{width:auto;height:100%;justify-content:center;padding-top:0}
+  body[data-edge="top"] #tasks{flex-direction:row}
+  body[data-edge="top"] .task{width:auto;height:100%}
+  body[data-edge="top"] #taskline::after{left:6.5px;right:auto;top:14px;bottom:14px;width:1px;height:auto}
   body[data-edge="top"] #divider::after{left:6.5px;right:auto;top:14px;bottom:14px;width:1px;height:auto;transition:background .15s,top .15s,bottom .15s}
   body[data-edge="top"] #divider.hot::after,body[data-edge="top"] #divider.pulled::after{left:6.5px;right:auto;top:10px;bottom:10px}
   body[data-edge="top"] .item.add .key{width:30px;height:46px}
@@ -195,7 +234,9 @@
   body[data-edge="top"] #stretch.hot::after{width:5px;height:30px}
   body[data-edge="top"] #stretch.pulled::after{width:5px;height:34px}
   body[data-edge="top"] .item.on::after{right:auto;left:50%;top:1.5px;width:14px;height:3px;transform:translateX(-50%)}
-  body[data-edge="top"] #card{right:auto;top:70px;transform:translateX(-50%)}
+  /* As wide as its words: placed by its middle, a label near the window's far end would be squeezed
+     into what is left past that middle */
+  body[data-edge="top"] #card{right:auto;top:70px;transform:translateX(-50%);width:max-content}
   body[data-edge="top"].dragging #pill{border-radius:22px;transform:translateY(8px) scale(1.03)}
   /* Folded: a short pill with one key, lit by the accent, and no handle and no plus. The window is
      that pill and the room for its shadow; Windows carries it, the way it carries the capsule. */
@@ -209,7 +250,7 @@
   .item.unfold{flex:1 1 auto}
   .item.unfold .key{background:color-mix(in srgb,var(--accent) 24%,var(--key));box-shadow:inset 0 0 0 1.5px var(--accent);color:var(--ink)}
   .item.unfold.hot .key,.item.unfold.down .key{background:color-mix(in srgb,var(--accent) 36%,var(--key))}
-  @media (prefers-reduced-motion: reduce){#pill,.key,#grip::after,#stretch::after,.dial,.arc{transition:none}}
+  @media (prefers-reduced-motion: reduce){#pill,.key,#grip::after,#stretch::after,.dial,.arc,.t-bar i{transition:none}.task.running .t-bar i{animation:none;width:100%;opacity:.5}}
 </style>
 </head>
 <body>
@@ -231,16 +272,21 @@
   // The meters and the line before them are part of the keys' strip only while there are meters
   const divider = Object.assign(document.createElement('div'), { id: 'divider' });
   const gauges = Object.assign(document.createElement('div'), { id: 'meters' });
+  // So are the tasks and the line before them only while there are tasks
+  const taskline = Object.assign(document.createElement('div'), { id: 'taskline' });
+  const taskBox = Object.assign(document.createElement('div'), { id: 'tasks' });
   // The end grip is in the foot only while the signs are
   const tail = Object.assign(document.createElement('div'), { id: 'stretch' });
   const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
   const LONG_PRESS_MS = 400, HOVER_MS = 300, LABEL_STAYS_MS = 4000, SLOP = 8, EDGE = 22, EDGE_STEP = 6, NOTE_MS = 2000, FAILED_MS = 2500, APPEAR_MS = 180, FLASH_MS = 140, SIGNS_MS = 4000, PEEK = 18;
   // The pill's parts as layout.rs has them (GRIP, ADD, END, STRETCH, LINE, METER); above
   // WARN a meter takes the warning colour
-  const GRIP = 44, ADD = 38, END = 3, STRETCH = 44, LINE = 14, METER = 52, WARN = 80;
+  const GRIP = 44, ADD = 38, END = 3, STRETCH = 44, LINE = 14, METER = 52, WARN = 80, MORE_LINES = 10;
   // The meters as Rust sent them, with their values, and the generation of those values; the
   // share of the room the keys take, as the line stands
   let meters = [], generation = null, split = null, cell = 54, count = 0;
+  // The tasks as Rust sent them, the cells the section has for them, and the words of the cell of more
+  let tasks = [], taskCells = 0, moreWords = ['', ''];
   // The cells the capsule was stretched to, or null for as many as its keys, up to four; what
   // the end grip may stretch it to: `[cells, length of the pill with the signs, room of its keys and
   // meters]`, as Rust sent them; and the room the keys and the meters share, with the plus and with
@@ -393,6 +439,90 @@
       fill(b.querySelector('.ring'), meters[it.ring] ? meters[it.ring].value : null);
     }
   }
+  // A task: its name, how far it is or how long it has run, a bar. Without a percent the bar only
+  // runs. The name for a screen reader says all the label would. With more tasks than cells the last
+  // cell says how many more, and its label lists them
+  const moreCount = () => tasks.length > taskCells ? tasks.length - taskCells + 1 : 0;
+  // A task's bar between the writes. A writer may say its percent only every few seconds, and a bar
+  // that stands and then jumps looks stuck. So the page keeps the last percents of each task with
+  // when the file said them, and moves the bar on by their speed, or by the speed the file says
+  // (`rate`). The number in the cell stays what the file says. The bar never goes back, goes no
+  // further than a usual step past the last percent, and stands once the file is quieter than that.
+  const GLIDE_POINTS = 6, GLIDE_SLACK = 1.2, GLIDE_STEP_MS = 10000, GLIDE_MS = 250;
+  const stillMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  // By a task's id: `points`, [ms, percent] of each write that changed the percent; `shown`, the bar
+  const glides = new Map();
+  let glideTimer = 0;
+  function track(list) {
+    const seen = new Set();
+    for (const t of list) {
+      if (t.id == null || t.percent == null) continue;
+      seen.add(t.id);
+      let g = glides.get(t.id);
+      const last = g && g.points.at(-1);
+      // A percent lower than the last is work begun anew: the bar starts again from it
+      if (!g || t.percent < last[1]) glides.set(t.id, g = { points: [[t.written, t.percent]], shown: t.percent });
+      else if (t.percent > last[1] && t.written > last[0]) {
+        g.points.push([t.written, t.percent]);
+        if (g.points.length > GLIDE_POINTS) g.points.shift();
+        g.shown = Math.max(g.shown, t.percent);
+      }
+      g.rate = t.rate;
+      g.stale = t.stale;
+    }
+    for (const id of glides.keys()) if (!seen.has(id)) glides.delete(id);
+    glideOn();
+  }
+  // Where the bar of `g` is at `now`, and whether it still moves on. The speed and the usual step are
+  // those of the last few writes, so one late or early write moves them little
+  function glideAt(g, now) {
+    const [t0, p0] = g.points[0], [t1, p1] = g.points.at(-1), steps = g.points.length - 1;
+    const step = steps && t1 > t0 ? (t1 - t0) / steps : GLIDE_STEP_MS;
+    const rate = g.rate ?? (steps && t1 > t0 ? (p1 - p0) / (t1 - t0) * 1000 : 0);
+    if (g.stale || stillMotion.matches || !(rate > 0)) return [g.shown, false];
+    const quiet = Math.max(now - t1, 0), reach = step * GLIDE_SLACK;
+    return [Math.min(100, Math.max(g.shown, p1 + rate * Math.min(quiet, reach) / 1000)), quiet < reach];
+  }
+  function glideOn() {
+    clearTimeout(glideTimer);
+    const now = Date.now();
+    let moving = false;
+    for (const g of glides.values()) {
+      const [at, on] = glideAt(g, now);
+      g.shown = at;
+      moving ||= on;
+    }
+    [...taskBox.children].forEach((b, i) => {
+      const t = tasks[i], g = t && !b.classList.contains('more') && glides.get(t.id);
+      b.classList.toggle('glide', !!g && !stillMotion.matches);
+      if (g) b.querySelector('.t-bar i').style.width = g.shown + '%';
+    });
+    if (moving) glideTimer = setTimeout(glideOn, GLIDE_MS);
+  }
+  function paintTasks() {
+    const more = moreCount();
+    [...taskBox.children].forEach((b, i) => {
+      const last = more && i === taskCells - 1, t = tasks[i], v = t ? t.percent : null;
+      b.classList.toggle('more', !!last);
+      b.classList.toggle('stale', !last && !!t.stale);
+      b.classList.toggle('running', !last && v == null);
+      b.querySelector('.t-name').textContent = last ? moreWords[0] : t.name;
+      b.querySelector('.t-pct').textContent = last ? more : v == null ? t.elapsed : v + '%';
+      const g = !last && v != null && glides.get(t.id);
+      b.querySelector('.t-bar i').style.width = last || v == null ? '' : (g ? g.shown : v) + '%';
+      b.setAttribute('aria-label', last ? `${moreWords[0]} ${more}` : [t.name, v == null ? t.elapsed : v + '%', t.status, t.ago].filter(Boolean).join(' · '));
+    });
+  }
+  function drawTasks() {
+    taskBox.replaceChildren(...Array.from({ length: taskCells }, (_, i) => {
+      const b = Object.assign(document.createElement('button'), { className: 'task' });
+      b.dataset.t = i;
+      b.innerHTML = '<span class="t-name"></span><span class="t-pct"></span><span class="t-bar"><i></i></span>';
+      return b;
+    }));
+    taskBox.style.flexBasis = taskCells * METER + 'px';
+    paintTasks();
+  }
   // The keys and the meters share the room between them as `parts` in layout.rs does. The room is
   // the same wherever the line stands; the line moves the border inside it a whole meter at a time:
   // the meters' part is whole meters, one or more and no more than all of them, the keys get the
@@ -414,7 +544,8 @@
   function roomNow() {
     const i = signs ? 1 : 0;
     if (room) return room[i];
-    return lengths ? lengths[i] - GRIP - ADD - END - (signs ? ADD + STRETCH : 0) - (meters.length ? LINE : 0) : 0;
+    const section = taskCells ? LINE + taskCells * METER : 0;
+    return lengths ? lengths[i] - GRIP - ADD - END - (signs ? ADD + STRETCH : 0) - (meters.length ? LINE : 0) - section : 0;
   }
   function share() {
     if (!meters.length) list.style.flex = gauges.style.flex = '';
@@ -493,6 +624,10 @@
       before = [];
       shown = [{ name: '', glyph: view.unfold, unfold: true }];
       meters = [];
+      tasks = [];
+      track(tasks);
+      taskCells = 0;
+      taskBox.replaceChildren();
       gauges.replaceChildren();
       list.replaceChildren();
       keys.replaceChildren(button(0));
@@ -504,6 +639,10 @@
     rims = new Map(view.items.filter(it => it.rim != null).map(it => [it.at, it.rim]));
     age = view.age ?? null;
     meters = view.meters || [];
+    tasks = view.tasks || [];
+    track(tasks);
+    taskCells = view.task_cells || 0;
+    moreWords = view.more_tasks || moreWords;
     generation = view.generation ?? null;
     // A view copied before the last event `meters` came reaches the page after it: the event's
     // values are the newer ones, and an unchanged read sends no other
@@ -521,7 +660,8 @@
     const made = view.items.map((it, i) => button(i));
     list.replaceChildren(...made);
     gauges.replaceChildren(...meters.map((m, i) => gauge(i)));
-    keys.replaceChildren(list, ...(meters.length ? [divider, gauges] : []));
+    keys.replaceChildren(list, ...(meters.length ? [divider, gauges] : []), ...(taskCells ? [taskline, taskBox] : []));
+    drawTasks();
     paintMeters();
     drawFoot();
     fades(list);
@@ -640,6 +780,20 @@
   // The label says that a key did not work: the cursor passing over the keys does not take it away
   let failing = false;
   function showCard(b) {
+    if (b.classList.contains('task')) {
+      const at = Number(b.dataset.t), more = moreCount();
+      if (more && at === taskCells - 1) {
+        const rest = tasks.slice(at), lines = rest.slice(0, MORE_LINES).map(t => `${t.name} · ${t.percent == null ? t.elapsed : t.percent + '%'}`);
+        if (rest.length > MORE_LINES) lines.push(`+${rest.length - MORE_LINES}`);
+        openCard(b, `${moreWords[1]}: ${more}`, '', lines, { rows: [] });
+      } else {
+        const t = tasks[at];
+        if (!t) return;
+        openCard(b, t.name, '', t.status ? [t.status] : [], { rows: [['', t.percent == null ? t.elapsed : t.percent + '\u00a0%', '']], stale: t.stale, problem: t.ago });
+      }
+      card.classList.add('of-task');
+      return placeCard(), letThrough();
+    }
     if (b.classList.contains('meter')) {
       // A row for the percent and one for the outer ring, each with its name and when it resets;
       // how old a stale reading is and the file's own lines under them; the problem last
@@ -657,6 +811,7 @@
   function openCard(anchor, title, sub, hint, gauge = null) {
     failing = false;
     if (folded) return;
+    card.classList.remove('of-task');
     card.classList.toggle('gauge', !!gauge);
     card.querySelector('.c-title').textContent = title;
     card.querySelector('.c-sub').textContent = sub || '';
@@ -736,8 +891,8 @@
   const lift = () => { for (const b of keys.querySelectorAll('.down')) b.classList.remove('down'); };
   const keyAt = i => keys.querySelector(`.item[data-i="${i}"]`);
   keys.addEventListener('pointerdown', e => {
-    // The meters, the line and the end grip take their presses themselves
-    if (e.target.closest('#meters, #divider, #stretch')) return;
+    // The meters, the tasks, the lines and the end grip take their presses themselves
+    if (e.target.closest('#meters, #tasks, #taskline, #divider, #stretch')) return;
     hideCard();
     const b = e.target.closest('.item');
     // The item is kept as it was at the press: the release taps it whatever is drawn by then
@@ -1067,6 +1222,40 @@
   // where they were when it opened (`cardAt`), not for a scroll event that moved nothing
   gauges.addEventListener('scroll', () => { if (cardFor && cardFor.parentElement === gauges && scrolled(gauges) !== cardAt) hideCard(); }, { passive: true });
 
+  // A press on a task shows its label at once, which stays LABEL_STAYS_MS after the release. A task
+  // does nothing else: it is someone else's work
+  let taskPress = null;
+  taskBox.addEventListener('pointerdown', e => {
+    hideCard();
+    taskPress = { id: e.pointerId };
+    try { taskBox.setPointerCapture(e.pointerId); } catch (_) {}
+    const b = e.target.closest('.task');
+    if (b) showCard(b);
+  });
+  taskBox.addEventListener('pointerup', () => {
+    taskPress = null;
+    clearTimeout(cardTimer);
+    if (!card.hidden) cardTimer = setTimeout(hideCard, LABEL_STAYS_MS);
+    afterPress();
+  });
+  taskBox.addEventListener('pointercancel', () => { taskPress = null; hideCard(); afterPress(); });
+  // Rust reads the folder of the tasks twice a second and sends the list when it changed. The same
+  // number of cells is painted where it stands, with an open label's words; another number has already
+  // sized the window, and takes a drawing that leaves the keys and the meters scrolled as they were
+  window.__TAURI__.event.listen('tasks', async e => {
+    if (folded) return;
+    if (e.payload.cells === taskCells) {
+      tasks = e.payload.tasks;
+      track(tasks);
+      paintTasks();
+      if (!card.hidden && cardFor && cardFor.classList.contains('task')) showCard(cardFor);
+      return;
+    }
+    const at = [list, gauges].map(box => [box.scrollTop, box.scrollLeft]);
+    await redraw();
+    [list, gauges].forEach((box, i) => box.scrollTo({ top: at[i][0], left: at[i][1], behavior: 'auto' }));
+  });
+
   // Rust reads the meters about once a second and sends their values when one changed: a
   // percent with a file's outer ring and hint, or null where nothing was found, for each meter of
   // the settings file. Values of
@@ -1116,9 +1305,9 @@
     if (signs && wasOver && !overPill) waitForSigns();
     if (!at && press && press.long && !press.carry) drop();
     // While a meter is pressed its label is the press's, not the cursor's
-    if (tick) return;
+    if (tick || taskPress) return;
     const el = at && !afterTouch && !press ? document.elementFromPoint(at[0], at[1]) : null;
-    const b = el ? el.closest('.item, .meter') : null;
+    const b = el ? el.closest('.item, .meter, .task') : null;
     grip.classList.toggle('hot', !!el && !!el.closest('#grip'));
     divider.classList.toggle('hot', !!el && !!el.closest('#divider'));
     tail.classList.toggle('hot', !!el && !!el.closest('#stretch'));
@@ -1190,9 +1379,9 @@
   }
   // Resolves once the keys are drawn, or put off again.
   async function redraw(set = false, note = null) {
-    if (press || pull || tick || reaching) return putOff(set, note);
+    if (press || pull || tick || taskPress || reaching) return putOff(set, note);
     const view = await invoke('get_view');
-    if (press || pull || tick || reaching) return putOff(set, note);
+    if (press || pull || tick || taskPress || reaching) return putOff(set, note);
 
     setChange = setChange || set;
     render(view);
